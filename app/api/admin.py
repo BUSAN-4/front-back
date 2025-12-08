@@ -21,7 +21,6 @@ async def get_all_users(
     if search:
         search_term = f"%{search}%"
         query = query.filter(
-            (User.username.like(search_term)) |
             (User.name.like(search_term)) |
             (User.email.like(search_term))
         )
@@ -73,9 +72,10 @@ async def update_user_role(
     
     # role 문자열을 UserRole enum으로 변환
     role_map = {
-        "general": UserRole.GENERAL,
-        "city": UserRole.CITY,
-        "admin": UserRole.ADMIN
+        "GENERAL": UserRole.GENERAL,
+        "ADMIN": UserRole.ADMIN,
+        "user": UserRole.GENERAL,  # 하위 호환성
+        "admin": UserRole.ADMIN    # 하위 호환성
     }
     
     if role not in role_map:

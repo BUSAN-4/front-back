@@ -5,11 +5,11 @@ from app.models.user import UserRole
 
 
 class UserBase(BaseModel):
-    username: str
     email: EmailStr
     name: str
     phone: Optional[str] = None
     role: UserRole = UserRole.GENERAL
+    organization: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -24,11 +24,11 @@ class UserUpdate(BaseModel):
 
 class UserResponse(BaseModel):
     id: str  # frontend는 string으로 사용
-    username: str
     email: str
     name: Optional[str] = None
     phone: Optional[str] = None
     role: str  # frontend는 string으로 사용
+    organization: Optional[str] = None
     createdAt: str  # ISO format string
     
     class Config:
@@ -39,11 +39,11 @@ class UserResponse(BaseModel):
         """ORM User 객체를 UserResponse로 변환"""
         return cls(
             id=str(user.id),
-            username=user.username,
             email=user.email,
             name=user.name,
             phone=user.phone,
             role=user.role.value,
+            organization=user.organization,
             createdAt=user.created_at.isoformat() if user.created_at else ""
         )
 

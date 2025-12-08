@@ -1,30 +1,63 @@
-# Database Configuration (AWS RDS MariaDB)
-DATABASE_URL=mysql+pymysql://user:password@host:port/dbname?charset=utf8mb4
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
 
-# JWT Configuration
-SECRET_KEY=your-secret-key-here-change-in-production
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+# 가상환경
+venv/
+env/
+ENV/
+fastapi/
 
-# Application Configuration
-PROJECT_NAME=FastAPI Backend
-DEBUG=Falsengs/
-
-# Environment variables
+# 환경 변수 파일 (민감한 정보 포함)
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+.env.test
+*.env
 
-# Database
+# 데이터베이스
 *.db
 *.sqlite
 *.sqlite3
 *.sql
 
-# Logs
+# 로그
 *.log
 logs/
 *.log.*
+
+# 테스트 및 커버리지
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# pyenv
+.python-version
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
@@ -39,23 +72,15 @@ desktop.ini
 # Docker
 .dockerignore
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.hypothesis/
+# 빌드 산출물
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
+# 민감한 정보가 포함된 파일 (파일명 패턴)
+*credentials*
+*secret*
+*password*
+*key*

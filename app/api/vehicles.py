@@ -1,174 +1,233 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
-from typing import List
-from app.database import get_db
+from sqlalchemy import distinct, func
+from typing import List, Optional
+from pydantic import BaseModel
+from app.database import get_db, get_busan_car_db, get_web_db
 from app.api.deps import get_current_active_user
 from app.models.user import User
 from app.models.vehicle import Vehicle, VehicleType
-from app.schemas.vehicle import VehicleCreate, VehicleUpdate, VehicleResponse
+from app.models.user_vehicle_mapping import UserVehicleMapping
+from app.models.busan_car_models import (
+    BusanCarDrivingSession,
+    BusanCarPlateInfo
+)
 
 router = APIRouter()
 
 
-@router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_vehicle(
-    vehicle: VehicleCreate,
+class VehicleRegisterRequest(BaseModel):
+    license_plate: str  # 번호판 (예: 12가3456)
+    vehicle_type: str = "PRIVATE"  # PRIVATE, TAXI, RENTAL
+    model: Optional[str] = None
+    year: Optional[int] = None
+
+
+class VehicleRegisterResponse(BaseModel):
+    id: int
+    license_plate: str
+    vehicle_type: str
+    car_id: Optional[str] = None  # 매핑된 car_id
+    message: str
+
+
+@router.post("/register", response_model=VehicleRegisterResponse)
+async def register_vehicle(
+    request: VehicleRegisterRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    web_db: Session = Depends(get_web_db),
+    busan_car_db: Session = Depends(get_busan_car_db)
 ):
-    """차량 등록"""
-    # Pydantic 모델을 dict로 변환 (by_alias=False로 필드명 사용)
-    vehicle_dict = vehicle.dict(by_alias=False)
+    """
+    번호판으로 차량 등록
+    vehicles 테이블에 차량 정보 저장하고, busan_car DB에서 임의의 car_id와 매핑
+    """
+    license_plate = request.license_plate.strip()
     
-    # 중복 확인
-    existing = db.query(Vehicle).filter(Vehicle.license_plate == vehicle_dict.get("licensePlate")).first()
-    if existing:
+    # 1. 이미 등록된 번호판인지 확인 (현재 사용자 중에서)
+    existing_vehicle = web_db.query(Vehicle).filter(
+        Vehicle.user_id == current_user.id,
+        Vehicle.license_plate == license_plate
+    ).first()
+    
+    if existing_vehicle:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Vehicle with this license plate already exists"
+            status_code=400,
+            detail="이미 등록된 번호판입니다."
         )
     
-    # vehicle_type을 enum으로 변환
-    vehicle_type_enum = VehicleType(vehicle_dict.get("vehicleType"))
+    # 2. vehicle_type 검증
+    try:
+        vehicle_type = VehicleType(request.vehicle_type.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"유효하지 않은 차량 유형입니다. PRIVATE, TAXI, RENTAL 중 하나를 선택하세요."
+        )
     
-    db_vehicle = Vehicle(
-        license_plate=vehicle_dict.get("licensePlate"),
-        vehicle_type=vehicle_type_enum,
-        model=vehicle_dict.get("model"),
-        year=vehicle_dict.get("year"),
-        user_id=current_user.id
+    # 3. busan_car DB의 uservehicle 테이블에서 주행 데이터가 있는 임의의 car_id 선택
+    from app.models.busan_car_models import BusanCarUserVehicle, BusanCarDrivingSession
+    import random
+    
+    # uservehicle 테이블에서 주행 세션이 있는 car_id 목록 조회
+    vehicles_with_sessions = busan_car_db.query(
+        BusanCarUserVehicle.car_id
+    ).join(
+        BusanCarDrivingSession,
+        BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
+    ).distinct().all()
+    
+    car_id = None
+    if vehicles_with_sessions:
+        # 주행 데이터가 있는 car_id 중에서 임의로 선택
+        selected = random.choice(vehicles_with_sessions)
+        car_id = selected.car_id
+    else:
+        # 주행 데이터가 없으면 uservehicle 테이블에서 임의의 car_id 선택
+        all_vehicles = busan_car_db.query(BusanCarUserVehicle.car_id).all()
+        if all_vehicles:
+            selected = random.choice(all_vehicles)
+            car_id = selected.car_id
+    
+    if not car_id:
+        raise HTTPException(
+            status_code=404,
+            detail="등록 가능한 차량이 없습니다."
+        )
+    
+    # 4. 선택한 car_id가 uservehicle 테이블에 존재하는지 확인
+    vehicle_check = busan_car_db.query(BusanCarUserVehicle).filter(
+        BusanCarUserVehicle.car_id == car_id
+    ).first()
+    
+    if not vehicle_check:
+        raise HTTPException(
+            status_code=404,
+            detail=f"차량 ID '{car_id}'를 찾을 수 없습니다."
+        )
+    
+    # 5. vehicles 테이블에 저장 (car_id 포함)
+    new_vehicle = Vehicle(
+        user_id=current_user.id,
+        license_plate=license_plate,
+        car_id=car_id,  # busan_car DB의 car_id와 매핑
+        vehicle_type=vehicle_type,
+        model=request.model,
+        year=request.year
     )
-    db.add(db_vehicle)
-    db.commit()
-    db.refresh(db_vehicle)
+    web_db.add(new_vehicle)
     
-    vehicle_response = VehicleResponse.from_orm_vehicle(db_vehicle)
-    return vehicle_response.dict()
+    # 6. user_vehicle_mapping 테이블에도 저장
+    # 이미 매핑이 존재하는지 확인
+    existing_mapping = web_db.query(UserVehicleMapping).filter(
+        UserVehicleMapping.user_id == current_user.id,
+        UserVehicleMapping.car_plate_number == license_plate,
+        UserVehicleMapping.car_id == car_id
+    ).first()
+    
+    if not existing_mapping:
+        new_mapping = UserVehicleMapping(
+            user_id=current_user.id,
+            car_plate_number=license_plate,
+            car_id=car_id
+        )
+        web_db.add(new_mapping)
+    
+    web_db.commit()
+    web_db.refresh(new_vehicle)
+    
+    return VehicleRegisterResponse(
+        id=new_vehicle.id,
+        license_plate=new_vehicle.license_plate,
+        vehicle_type=new_vehicle.vehicle_type.value,
+        car_id=new_vehicle.car_id,
+        message=f"차량이 성공적으로 등록되었습니다. (매핑된 차량 ID: {car_id})"
+    )
 
 
 @router.get("", response_model=List[dict])
 async def get_vehicles(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    web_db: Session = Depends(get_web_db)
 ):
-    """사용자의 차량 목록 조회"""
-    vehicles = db.query(Vehicle).filter(Vehicle.user_id == current_user.id).all()
-    return [VehicleResponse.from_orm_vehicle(v).dict() for v in vehicles]
-
-
-@router.get("/{vehicle_id}", response_model=dict)
-async def get_vehicle(
-    vehicle_id: str,  # frontend는 string으로 전달
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """차량 상세 조회"""
-    try:
-        vehicle_id_int = int(vehicle_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid vehicle ID"
-        )
-    """차량 상세 조회"""
-    vehicle = db.query(Vehicle).filter(
-        Vehicle.id == vehicle_id_int,
+    """사용자가 등록한 차량 목록 조회"""
+    # vehicles 테이블에서 사용자의 차량 가져오기
+    vehicles = web_db.query(Vehicle).filter(
         Vehicle.user_id == current_user.id
-    ).first()
+    ).all()
     
-    if not vehicle:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vehicle not found"
-        )
+    if not vehicles:
+        return []
     
-    vehicle_response = VehicleResponse.from_orm_vehicle(vehicle)
-    return vehicle_response.dict()
+    vehicles_info = []
+    for vehicle in vehicles:
+        vehicles_info.append({
+            "id": vehicle.id,
+            "licensePlate": vehicle.license_plate,
+            "vehicleType": vehicle.vehicle_type.value,
+            "model": vehicle.model,
+            "year": vehicle.year,
+            "createdAt": vehicle.created_at.isoformat() if vehicle.created_at else None
+        })
+    
+    return vehicles_info
 
 
-@router.put("/{vehicle_id}", response_model=dict)
-async def update_vehicle(
-    vehicle_id: str,  # frontend는 string으로 전달
-    vehicle_update: VehicleUpdate,
+@router.get("/available-car-ids", response_model=List[dict])
+async def get_available_car_ids(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    busan_car_db: Session = Depends(get_busan_car_db)
 ):
-    """차량 정보 수정"""
-    try:
-        vehicle_id_int = int(vehicle_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid vehicle ID"
-        )
+    """등록 가능한 car_id 목록 조회 (사용자가 선택할 수 있도록)"""
+    from app.models.busan_car_models import BusanCarUserVehicle
     
-    vehicle = db.query(Vehicle).filter(
-        Vehicle.id == vehicle_id_int,
-        Vehicle.user_id == current_user.id
-    ).first()
+    # 주행 데이터가 있는 car_id만 조회
+    vehicles_with_sessions = busan_car_db.query(
+        BusanCarUserVehicle.car_id,
+        BusanCarUserVehicle.user_car_brand,
+        BusanCarUserVehicle.user_car_model,
+        BusanCarUserVehicle.user_car_year,
+        func.count(BusanCarDrivingSession.session_id).label('session_count')
+    ).join(
+        BusanCarDrivingSession,
+        BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
+    ).group_by(
+        BusanCarUserVehicle.car_id,
+        BusanCarUserVehicle.user_car_brand,
+        BusanCarUserVehicle.user_car_model,
+        BusanCarUserVehicle.user_car_year
+    ).order_by(
+        func.count(BusanCarDrivingSession.session_id).desc()
+    ).limit(100).all()
     
-    if not vehicle:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vehicle not found"
-        )
-    
-    update_data = vehicle_update.dict(exclude_unset=True, by_alias=True)
-    
-    # licensePlate 중복 확인
-    if "licensePlate" in update_data and update_data["licensePlate"] != vehicle.license_plate:
-        existing = db.query(Vehicle).filter(
-            Vehicle.license_plate == update_data["licensePlate"],
-            Vehicle.id != vehicle_id_int
-        ).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Vehicle with this license plate already exists"
-            )
-        vehicle.license_plate = update_data["licensePlate"]
-    
-    if "vehicleType" in update_data:
-        vehicle.vehicle_type = VehicleType(update_data["vehicleType"])
-    if "model" in update_data:
-        vehicle.model = update_data["model"]
-    if "year" in update_data:
-        vehicle.year = update_data["year"]
-    
-    db.commit()
-    db.refresh(vehicle)
-    
-    vehicle_response = VehicleResponse.from_orm_vehicle(vehicle)
-    return vehicle_response.dict()
+    return [{
+        "carId": v.car_id,
+        "brand": v.user_car_brand,
+        "model": v.user_car_model,
+        "year": v.user_car_year,
+        "sessionCount": v.session_count
+    } for v in vehicles_with_sessions]
 
 
-@router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{vehicle_id}")
 async def delete_vehicle(
-    vehicle_id: str,  # frontend는 string으로 전달
+    vehicle_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    web_db: Session = Depends(get_web_db)
 ):
-    """차량 삭제"""
-    try:
-        vehicle_id_int = int(vehicle_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid vehicle ID"
-        )
-    
-    vehicle = db.query(Vehicle).filter(
-        Vehicle.id == vehicle_id_int,
+    """등록된 차량 삭제"""
+    vehicle = web_db.query(Vehicle).filter(
+        Vehicle.id == vehicle_id,
         Vehicle.user_id == current_user.id
     ).first()
     
     if not vehicle:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vehicle not found"
+            status_code=404,
+            detail="등록된 차량을 찾을 수 없습니다."
         )
     
-    db.delete(vehicle)
-    db.commit()
-    return None
-
+    web_db.delete(vehicle)
+    web_db.commit()
+    
+    return {"message": "차량이 삭제되었습니다."}
