@@ -1,20 +1,46 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from '../components/common/ProtectedRoute';
+import ErrorBoundary from '../components/common/ErrorBoundary';
 
+// 레이아웃 (자주 사용되므로 일반 import)
+import UserLayout from '../layouts/UserLayout';
+import AdminLayout from '../layouts/AdminLayout';
+
+// 인증 페이지 (초기 로딩에 필요하므로 일반 import)
 import LoginPage from '../pages/auth/LoginPage';
 import RegisterPage from '../pages/auth/RegisterPage';
 
-import UserDashboardPage from '../pages/user/UserDashboardPage';
-import UserTripDetailPage from '../pages/user/UserTripDetailPage';
-import UserMyPage from '../pages/user/UserMyPage';
+// Lazy loading - 일반 사용자
+const UserDashboardPage = lazy(() => import('../pages/user/UserDashboardPage'));
+const UserTripDetailPage = lazy(() => import('../pages/user/UserTripDetailPage'));
+const UserMyPage = lazy(() => import('../pages/user/UserMyPage'));
+const UserSafetyScorePage = lazy(() => import('../pages/user/UserSafetyScorePage'));
+const UserSafetyDetailPage = lazy(() => import('../pages/user/UserSafetyDetailPage'));
 
-import CityDashboardSafeDriving from '../pages/city/CityDashboardSafeDriving';
-import CityDashboardIllegalParking from '../pages/city/CityDashboardIllegalParking';
-import CityDashboardMissingPerson from '../pages/city/CityDashboardMissingPerson';
+// Lazy loading - 부산시 관리자
+const CityDashboardSafeDriving = lazy(() => import('../pages/admin/city/CityDashboardSafeDriving'));
+const CityDashboardDelinquent = lazy(() => import('../pages/admin/city/CityDashboardDelinquent'));
+const CityDashboardMissingPerson = lazy(() => import('../pages/admin/city/CityDashboardMissingPerson'));
+const CityBestDriversPage = lazy(() => import('../pages/admin/city/CityBestDriversPage'));
 
-import AdminDashboardPage from '../pages/admin/AdminDashboardPage';
-import AdminUserManagementPage from '../pages/admin/AdminUserManagementPage';
-import AdminLogMonitoringPage from '../pages/admin/AdminLogMonitoringPage';
+// Lazy loading - 국세청 관리자
+const NTSDashboard = lazy(() => import('../pages/admin/nts/NTSDashboard'));
+
+// Lazy loading - 경찰청 관리자
+const PoliceDashboard = lazy(() => import('../pages/admin/police/PoliceDashboard'));
+
+// Lazy loading - 시스템 관리자
+const SystemDashboardPage = lazy(() => import('../pages/admin/system/SystemDashboardPage'));
+const SystemUserManagementPage = lazy(() => import('../pages/admin/system/SystemUserManagementPage'));
+const SystemLogMonitoringPage = lazy(() => import('../pages/admin/system/SystemLogMonitoringPage'));
+
+// 로딩 컴포넌트
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <div className="text-gray-600">로딩 중...</div>
+  </div>
+);
 
 export default function AppRouter() {
   return (
@@ -22,92 +48,181 @@ export default function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
+      {/* 일반 사용자 라우트 */}
       <Route
-        path="/user/dashboard"
+        path="/user/*"
         element={
-          <ProtectedRoute allowedRoles={['general']}>
-            <UserDashboardPage />
+          <ProtectedRoute allowedRoles={['GENERAL']}>
+            <UserLayout />
           </ProtectedRoute>
         }
-      />
-      <Route
-        path="/user/trip-detail/:vehicleId"
-        element={
-          <ProtectedRoute allowedRoles={['general']}>
-            <UserTripDetailPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/user/mypage"
-        element={
-          <ProtectedRoute allowedRoles={['general']}>
-            <UserMyPage />
-          </ProtectedRoute>
-        }
-      />
+      >
+        <Route index element={<Navigate to="/user/dashboard" replace />} />
+        <Route 
+          path="dashboard" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <UserDashboardPage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="safety-score" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <UserSafetyScorePage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="safety-detail/:sessionId" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <UserSafetyDetailPage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="trip-detail/:vehicleId" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <UserTripDetailPage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="mypage" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <UserMyPage />
+            </Suspense>
+          } 
+        />
+      </Route>
 
+      {/* 부산시 관리자 라우트 */}
       <Route
-        path="/city/main"
+        path="/admin/city/*"
         element={
-          <ProtectedRoute allowedRoles={['city']}>
-            <Navigate to="/city/safe-driving" replace />
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminLayout type="busan" />
           </ProtectedRoute>
         }
-      />
-      <Route
-        path="/city/safe-driving"
-        element={
-          <ProtectedRoute allowedRoles={['city']}>
-            <CityDashboardSafeDriving />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/city/illegal-parking"
-        element={
-          <ProtectedRoute allowedRoles={['city']}>
-            <CityDashboardIllegalParking />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/city/missing-person"
-        element={
-          <ProtectedRoute allowedRoles={['city']}>
-            <CityDashboardMissingPerson />
-          </ProtectedRoute>
-        }
-      />
+      >
+        <Route index element={<Navigate to="/admin/city/safe-driving" replace />} />
+        <Route 
+          path="safe-driving" 
+          element={
+            <ErrorBoundary>
+              <Suspense fallback={<PageLoader />}>
+                <CityDashboardSafeDriving />
+              </Suspense>
+            </ErrorBoundary>
+          } 
+        />
+        <Route 
+          path="delinquent" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <CityDashboardDelinquent />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="missing-person" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <CityDashboardMissingPerson />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="best-drivers" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <CityBestDriversPage />
+            </Suspense>
+          } 
+        />
+      </Route>
 
+      {/* 국세청 관리자 라우트 */}
       <Route
-        path="/admin/main"
+        path="/admin/nts"
         element={
-          <ProtectedRoute allowedRoles={['admin']}>
-            <AdminDashboardPage />
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminLayout type="nts" />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route 
+          index 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <NTSDashboard />
+            </Suspense>
+          } 
+        />
+      </Route>
+
+      {/* 경찰청 관리자 라우트 */}
       <Route
-        path="/admin/users"
+        path="/admin/police"
         element={
-          <ProtectedRoute allowedRoles={['admin']}>
-            <AdminUserManagementPage />
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminLayout type="police" />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route 
+          index 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <PoliceDashboard />
+            </Suspense>
+          } 
+        />
+      </Route>
+
+      {/* 시스템 관리자 라우트 */}
       <Route
-        path="/admin/logs"
+        path="/admin/system/*"
         element={
-          <ProtectedRoute allowedRoles={['admin']}>
-            <AdminLogMonitoringPage />
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminLayout type="system" />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route 
+          index 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <SystemDashboardPage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="users" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <SystemUserManagementPage />
+            </Suspense>
+          } 
+        />
+        <Route 
+          path="logs" 
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <SystemLogMonitoringPage />
+            </Suspense>
+          } 
+        />
+      </Route>
 
       <Route path="/" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }
+
 
 

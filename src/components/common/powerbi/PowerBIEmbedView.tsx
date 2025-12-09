@@ -18,19 +18,23 @@ export default function PowerBIEmbedView({
   // URL이 제공되면 iframe으로 직접 표시 (백엔드 불필요)
   if (reportUrl) {
     return (
-      <iframe
-        src={reportUrl}
-        width="100%"
-        height={height}
-        frameBorder="0"
-        allowFullScreen
-        style={{
-          border: '1px solid #e0e0e0',
-          borderRadius: '4px',
-          display: 'block',
-        }}
-        title="Power BI Report"
-      />
+      <div className="w-full" style={{ minHeight: height }}>
+        <iframe
+          src={reportUrl}
+          width="100%"
+          height={height}
+          frameBorder="0"
+          allowFullScreen
+          style={{
+            border: 'none',
+            borderRadius: '8px',
+            display: 'block',
+            width: '100%',
+            minHeight: height,
+          }}
+          title="Power BI Report"
+        />
+      </div>
     );
   }
 
@@ -85,5 +89,6 @@ export default function PowerBIEmbedView({
     />
   );
 }
+
 
 

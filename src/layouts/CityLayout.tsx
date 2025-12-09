@@ -13,7 +13,7 @@ import {
   Divider,
   Avatar,
 } from '@mui/material';
-import { DirectionsCar, LocalParking, PersonSearch } from '@mui/icons-material';
+import { DirectionsCar, PersonSearch, AccountBalance } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
 
 interface CityLayoutProps {
@@ -21,9 +21,9 @@ interface CityLayoutProps {
 }
 
 const menuItems = [
-  { label: '안전운전관리', path: '/city/safe-driving', icon: DirectionsCar },
-  { label: '불법주정차 단속 관리', path: '/city/illegal-parking', icon: LocalParking },
-  { label: '실종자 관리', path: '/city/missing-person', icon: PersonSearch },
+  { label: '안전운전관리', path: '/admin/city/safe-driving', icon: DirectionsCar },
+  { label: '체납자 관리', path: '/admin/city/delinquent', icon: AccountBalance },
+  { label: '실종자 관리', path: '/admin/city/missing-person', icon: PersonSearch },
 ];
 
 export default function CityLayout({ children }: CityLayoutProps) {
@@ -140,5 +140,6 @@ export default function CityLayout({ children }: CityLayoutProps) {
     </Box>
   );
 }
+
 
 

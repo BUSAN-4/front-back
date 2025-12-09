@@ -16,7 +16,7 @@ import {
   Paper,
 } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
-import UserLayout from '../../layouts/UserLayout';
+// UserLayout is already applied by the router, no need to import here
 import { useVehicle } from '../../hooks/useVehicle';
 import { formatDateTime } from '../../utils/helpers';
 import Card from '../../components/common/Card';
@@ -35,24 +35,20 @@ export default function UserTripDetailPage() {
 
   if (loading || isLoading) {
     return (
-      <UserLayout>
-        <Box display="flex" justifyContent="center" p={4}>
-          <CircularProgress />
-        </Box>
-      </UserLayout>
+      <Box display="flex" justifyContent="center" p={4}>
+        <CircularProgress />
+      </Box>
     );
   }
 
   if (!selectedVehicle) {
     return (
-      <UserLayout>
-        <Alert severity="error">차량 정보를 찾을 수 없습니다.</Alert>
-      </UserLayout>
+      <Alert severity="error">차량 정보를 찾을 수 없습니다.</Alert>
     );
   }
 
   return (
-    <UserLayout>
+    <>
       <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
         <Button
           startIcon={<ArrowBack />}
@@ -106,8 +102,10 @@ export default function UserTripDetailPage() {
           </CardContent>
         </Card>
       )}
-    </UserLayout>
+    </>
   );
 }
+
+
 
 

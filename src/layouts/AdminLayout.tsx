@@ -1,93 +1,132 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
-  Box,
-  Tabs,
-  Tab,
-  Divider,
-  Avatar,
-} from '@mui/material';
-import { useAuthStore } from '../store/authStore';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { Button } from '../components/ui/button';
+import { Car, Shield, Building2, BadgeAlert, UserX, LogOut, Settings, LayoutDashboard, Users, FileText } from 'lucide-react';
 
 interface AdminLayoutProps {
-  children: React.ReactNode;
+  type: 'busan' | 'nts' | 'police' | 'system';
 }
 
-export default function AdminLayout({ children }: AdminLayoutProps) {
+export default function AdminLayout({ type }: AdminLayoutProps) {
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
 
-  const getTabValue = () => {
-    if (location.pathname.includes('users')) return 1;
-    if (location.pathname.includes('logs')) return 2;
-    return 0;
-  };
-
-  const [tabValue, setTabValue] = useState(getTabValue());
-
-  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-    const routes = ['/admin/main', '/admin/users', '/admin/logs'];
-    navigate(routes[newValue]);
-  };
-
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     navigate('/login');
   };
 
+  const getOrganizationName = () => {
+    switch (type) {
+      case 'busan': return '부산시청';
+      case 'nts': return '국세청';
+      case 'police': return '경찰청';
+      case 'system': return '시스템 관리';
+      default: return '';
+    }
+  };
+
+  const getMenuItems = () => {
+    switch (type) {
+      case 'busan':
+        return [
+          { path: '/admin/city/safe-driving', label: '안전운전 관리', icon: Car },
+          { path: '/admin/city/delinquent', label: '체납자 관리', icon: BadgeAlert },
+          { path: '/admin/city/missing-person', label: '실종자 관리', icon: UserX },
+        ];
+      case 'nts':
+        return [
+          { path: '/admin/nts', label: '체납자 관리', icon: BadgeAlert },
+        ];
+      case 'police':
+        return [
+          { path: '/admin/police?tab=missing', label: '실종자 관리', icon: UserX },
+        ];
+      case 'system':
+        return [
+          { path: '/admin/system', label: '대시보드', icon: LayoutDashboard },
+          { path: '/admin/system/users', label: '사용자 관리', icon: Users },
+          { path: '/admin/system/logs', label: '로그 모니터링', icon: FileText },
+        ];
+      default:
+        return [];
+    }
+  };
+
+  const isActive = (path: string) => {
+    if (path.includes('?')) {
+      const [basePath] = path.split('?');
+      return location.pathname === basePath;
+    }
+    return location.pathname === path;
+  };
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: '#f5f5f5' }}>
-      <AppBar position="static" elevation={1} sx={{ bgcolor: '#1976d2' }}>
-        <Toolbar sx={{ px: 3 }}>
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            시스템 관리자
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Avatar sx={{ bgcolor: 'secondary.main', mr: 1 }}>{user?.username?.[0]?.toUpperCase()}</Avatar>
-            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.9)' }}>
-              {user?.name || user?.username}
-            </Typography>
-            <Divider orientation="vertical" flexItem sx={{ bgcolor: 'rgba(255,255,255,0.3)' }} />
-            <Button 
-              color="inherit" 
-              onClick={handleLogout}
-              sx={{ 
-                textTransform: 'none',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-              }}
-            >
-              로그아웃
-            </Button>
-          </Box>
-        </Toolbar>
-      </AppBar>
-      <Box sx={{ bgcolor: 'white', borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs 
-          value={tabValue} 
-          onChange={handleTabChange}
-          sx={{ 
-            px: 3,
-            '& .MuiTab-root': {
-              textTransform: 'none',
-              fontWeight: 500,
-              minHeight: 48,
-            }
-          }}
-        >
-          <Tab label="대시보드" />
-          <Tab label="사용자 관리" />
-          <Tab label="로그 모니터링" />
-        </Tabs>
-      </Box>
-      <Box sx={{ flex: 1, p: 3 }}>{children}</Box>
-    </Box>
+    <div className="min-h-screen bg-gray-100 flex">
+      {/* 사이드바 */}
+      <aside className="w-72 bg-white/95 backdrop-blur-xl border-r border-gray-300/50 flex flex-col shadow-apple-lg h-screen sticky top-0">
+        <div className="p-8 border-b border-gray-300/50 flex-shrink-0">
+          <div className="flex items-center gap-4 mb-3">
+            <div className="p-3 bg-blue-600 rounded-2xl shadow-apple-lg">
+              {type === 'busan' && <Building2 className="size-7 text-white" />}
+              {type === 'nts' && <BadgeAlert className="size-7 text-white" />}
+              {type === 'police' && <Shield className="size-7 text-white" />}
+              {type === 'system' && <Settings className="size-7 text-white" />}
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 tracking-tight">{getOrganizationName()}</h2>
+              <p className="text-sm text-gray-600 font-medium">관리자 대시보드</p>
+            </div>
+          </div>
+        </div>
+
+        <nav className="flex-1 p-6 space-y-2 overflow-y-auto">
+          {getMenuItems().map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.path}
+                onClick={() => {
+                  const [path] = item.path.split('?');
+                  navigate(path);
+                }}
+                className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all text-base font-semibold ${
+                  isActive(item.path)
+                    ? 'bg-blue-50 text-blue-600 shadow-apple'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Icon className="size-6" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="p-6 border-t border-gray-300/50 bg-white flex-shrink-0 sticky bottom-0">
+          <div className="flex items-center gap-4 mb-4 px-2">
+            <div className="size-12 bg-gray-200 rounded-full flex items-center justify-center shadow-apple">
+              <span className="text-lg text-gray-700 font-bold">{user?.name?.[0]?.toUpperCase() || 'U'}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-base text-gray-900 font-semibold truncate">{user?.name || '사용자'}</p>
+              <p className="text-sm text-gray-600 truncate">{user?.email || ''}</p>
+            </div>
+          </div>
+          <Button variant="outline" size="default" onClick={handleLogout} className="w-full rounded-xl">
+            <LogOut className="size-5 mr-2" />
+            로그아웃
+          </Button>
+        </div>
+      </aside>
+
+      {/* 메인 콘텐츠 */}
+      <main className="flex-1 overflow-auto">
+        <div className="p-12">
+          <Outlet />
+        </div>
+      </main>
+    </div>
   );
 }
-
-

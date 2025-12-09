@@ -14,46 +14,7 @@ interface VehicleState {
   fetchTripRecords: (vehicleId: string) => Promise<void>;
 }
 
-const mockVehicles: Vehicle[] = [
-  {
-    id: '1',
-    userId: '1',
-    licensePlate: '12가3456',
-    vehicleType: 'private',
-    model: '소나타',
-    year: 2020,
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const mockTripRecords: Record<string, TripRecord[]> = {
-  '1': [
-    {
-      id: '1',
-      vehicleId: '1',
-      startTime: new Date(Date.now() - 86400000).toISOString(),
-      endTime: new Date(Date.now() - 86400000 + 3600000).toISOString(),
-      distance: 45.5,
-      duration: 3600,
-      safetyScore: 85.5,
-      drowsinessCount: 2,
-      suddenAccelerationCount: 1,
-      location: '부산시 해운대구',
-    },
-    {
-      id: '2',
-      vehicleId: '1',
-      startTime: new Date(Date.now() - 172800000).toISOString(),
-      endTime: new Date(Date.now() - 172800000 + 7200000).toISOString(),
-      distance: 120.3,
-      duration: 7200,
-      safetyScore: 92.0,
-      drowsinessCount: 0,
-      suddenAccelerationCount: 0,
-      location: '부산시 남구',
-    },
-  ],
-};
+// Mock 데이터 제거됨 - 실제 API를 사용합니다
 
 export const useVehicleStore = create<VehicleState>((set) => ({
   vehicles: [],
@@ -62,20 +23,50 @@ export const useVehicleStore = create<VehicleState>((set) => ({
   isLoading: false,
 
   fetchVehicles: async () => {
+    // Mock 데이터 제거됨 - 실제 API를 사용합니다
     set({ isLoading: true });
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    set({ vehicles: mockVehicles, isLoading: false });
+    try {
+      const { getUserVehicles } = await import('../utils/api');
+      const vehiclesData = await getUserVehicles();
+      // VehicleInfo를 Vehicle 타입으로 변환
+      const vehicles = vehiclesData.map((v) => ({
+        id: v.id.toString(),
+        userId: '', // 현재 사용자 ID는 API에서 처리
+        licensePlate: v.licensePlate,
+        vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
+        model: v.model || undefined,
+        year: v.year || undefined,
+        createdAt: v.createdAt || new Date().toISOString(),
+      }));
+      set({ vehicles, isLoading: false });
+    } catch (error) {
+      console.error('차량 목록 조회 실패:', error);
+      set({ vehicles: [], isLoading: false });
+    }
   },
 
   registerVehicle: async (data) => {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const newVehicle: Vehicle = {
-      ...data,
-      id: Date.now().toString(),
-      userId: '1',
-      createdAt: new Date().toISOString(),
-    };
-    set((state) => ({ vehicles: [...state.vehicles, newVehicle] }));
+    // 실제 API 호출
+    const { registerVehicleByPlate } = await import('../utils/api');
+    await registerVehicleByPlate(
+      data.licensePlate,
+      data.vehicleType?.toUpperCase() || 'PRIVATE',
+      data.model,
+      data.year
+    );
+    // 등록 후 목록 새로고침
+    const { getUserVehicles } = await import('../utils/api');
+    const vehiclesData = await getUserVehicles();
+    const vehicles = vehiclesData.map((v) => ({
+      id: v.id.toString(),
+      userId: '',
+      licensePlate: v.licensePlate,
+      vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
+      model: v.model || undefined,
+      year: v.year || undefined,
+      createdAt: v.createdAt || new Date().toISOString(),
+    }));
+    set({ vehicles });
   },
 
   updateVehicle: async (id, data) => {
@@ -92,11 +83,25 @@ export const useVehicleStore = create<VehicleState>((set) => ({
   },
 
   deleteVehicle: async (id) => {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    set((state) => ({
-      vehicles: state.vehicles.filter((v) => v.id !== id),
-      selectedVehicle: state.selectedVehicle?.id === id ? null : state.selectedVehicle,
+    // 실제 API 호출
+    const { deleteVehicle } = await import('../utils/api');
+    const vehicleId = parseInt(id);
+    if (!isNaN(vehicleId)) {
+      await deleteVehicle(vehicleId);
+    }
+    // 삭제 후 목록 새로고침
+    const { getUserVehicles } = await import('../utils/api');
+    const vehiclesData = await getUserVehicles();
+    const vehicles = vehiclesData.map((v) => ({
+      id: v.id.toString(),
+      userId: '',
+      licensePlate: v.licensePlate,
+      vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
+      model: v.model || undefined,
+      year: v.year || undefined,
+      createdAt: v.createdAt || new Date().toISOString(),
     }));
+    set({ vehicles, selectedVehicle: null });
   },
 
   selectVehicle: (vehicle) => {
@@ -104,11 +109,13 @@ export const useVehicleStore = create<VehicleState>((set) => ({
   },
 
   fetchTripRecords: async (vehicleId) => {
+    // Mock 데이터 제거됨 - 실제 API를 사용합니다
     set({ isLoading: true });
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const records = mockTripRecords[vehicleId] || [];
-    set({ tripRecords: records, isLoading: false });
+    // TODO: 실제 API 호출로 대체 필요
+    set({ tripRecords: [], isLoading: false });
   },
 }));
+
+
 
 

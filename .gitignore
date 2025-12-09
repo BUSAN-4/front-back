@@ -1,108 +1,74 @@
-# Logs
-logs
-*.log
+# Node.js
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+.pnpm-debug.log*
 
-# Dependencies
-node_modules
-.pnp
-.pnp.js
+# 빌드 산출물
+dist/
+build/
+.next/
+out/
 
-# Build outputs
-dist
-dist-ssr
-build
-*.local
-
-# Environment variables (민감한 정보 포함)
+# 환경 변수 파일 (민감한 정보 포함)
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
 .env.*.local
-.envrc
+.env.production
+.env.development
+.env.test
+*.env
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# 로그
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.project
+.classpath
+.settings/
 
-# OS files
-Thumbs.db
+# OS
 .DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Desktop.ini
+Thumbs.db
+desktop.ini
 
-# Testing
-coverage
-.nyc_output
-*.lcov
+# 캐시
+.cache/
+.parcel-cache/
+.npm/
+.eslintcache
+.stylelintcache
 
-# Temporary files
+# 테스트
+coverage/
+.nyc_output/
+
+# 임시 파일
 *.tmp
-*.temp
-.cache
-.parcel-cache
-.turbo
-
-# Package manager locks (선택사항 - 팀 정책에 따라)
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
-# Docker
-# .dockerignore  # ❌ 제거하거나 주석 처리
-docker-compose.override.yml
-*.dockerfile.local
-
-# AWS / Cloud
-.aws/
-.aws-sam/
-serverless.yml
-.terraform/
-*.tfstate
-*.tfstate.*
-
-# Kubernetes
-kubeconfig
-*.kubeconfig
-
-# Secrets and credentials
-secrets/
-*.pem
-*.key
-*.cert
-*.p12
-*.pfx
-credentials.json
-config.json
-
-# Power BI / API Keys (환경 변수로 관리 권장)
-# Power BI URL은 코드에서 환경 변수로 분리하는 것을 권장합니다
-
-# CI/CD
-.github/workflows/*.secret.yml
-.gitlab-ci.yml.local
-
-# Misc
 *.bak
-*.backup
-*.old
+*.swp
+*.orig
+
+# Python (frontend/app 폴더용)
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
