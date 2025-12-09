@@ -75,11 +75,16 @@ def require_busan_admin(
 def require_nts_admin(
     current_user: User = Depends(get_current_active_user)
 ) -> User:
-    """국세청 관리자 권한 필요 (ADMIN)"""
+    """국세청 관리자 권한 필요 (ADMIN + organization='nts')"""
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
+        )
+    if current_user.organization != "nts":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="국세청 관리자만 접근 가능합니다"
         )
     return current_user
 
@@ -87,11 +92,16 @@ def require_nts_admin(
 def require_police_admin(
     current_user: User = Depends(get_current_active_user)
 ) -> User:
-    """경찰청 관리자 권한 필요 (ADMIN)"""
+    """경찰청 관리자 권한 필요 (ADMIN + organization='police')"""
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
+        )
+    if current_user.organization != "police":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="경찰청 관리자만 접근 가능합니다"
         )
     return current_user
 

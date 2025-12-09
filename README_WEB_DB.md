@@ -17,12 +17,18 @@
 `.env` 파일에 다음 변수를 추가하세요:
 
 ```env
+# 로컬 MariaDB 연결 설정
 # busan_car 데이터베이스 (읽기 전용)
-DATABASE_URL=mysql+pymysql://user:password@host:port/busan_car?charset=utf8mb4
+DATABASE_URL=mysql+pymysql://root:password@localhost:3306/busan_car?charset=utf8mb4
 
 # web 데이터베이스 (쓰기용)
-WEB_DATABASE_URL=mysql+pymysql://user:password@host:port/web?charset=utf8mb4
+WEB_DATABASE_URL=mysql+pymysql://root:password@localhost:3306/web?charset=utf8mb4
 ```
+
+**참고:**
+- `root`: MariaDB 사용자명 (필요에 따라 변경)
+- `password`: MariaDB 비밀번호 (실제 비밀번호로 변경)
+- `localhost:3306`: 로컬 MariaDB 주소 및 포트 (기본 포트: 3306)
 
 ## Web DB 테이블 초기화
 

@@ -118,17 +118,15 @@ async def register_vehicle(
     web_db.add(new_vehicle)
     
     # 6. user_vehicle_mapping 테이블에도 저장
-    # 이미 매핑이 존재하는지 확인
+    # car_plate_number가 PK이므로 번호판만으로 확인
     existing_mapping = web_db.query(UserVehicleMapping).filter(
-        UserVehicleMapping.user_id == current_user.id,
-        UserVehicleMapping.car_plate_number == license_plate,
-        UserVehicleMapping.car_id == car_id
+        UserVehicleMapping.car_plate_number == license_plate
     ).first()
     
     if not existing_mapping:
         new_mapping = UserVehicleMapping(
+            car_plate_number=license_plate,  # PK
             user_id=current_user.id,
-            car_plate_number=license_plate,
             car_id=car_id
         )
         web_db.add(new_mapping)

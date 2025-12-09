@@ -76,13 +76,21 @@ pip install -r requirements.txt
 
 ### 3. 환경 변수 설정
 
+**로컬 MariaDB 연결 설정은 [LOCAL_DB_SETUP.md](./LOCAL_DB_SETUP.md)를 참고하세요.**
+
 `.env` 파일을 생성하고 환경 변수를 설정하세요:
 
 ```env
-DATABASE_URL=mysql+pymysql://user:password@host:port/dbname?charset=utf8mb4
+# 로컬 MariaDB 연결 (기본 포트: 3306)
+DATABASE_URL=mysql+pymysql://root:password@localhost:3306/busan_car?charset=utf8mb4
+WEB_DATABASE_URL=mysql+pymysql://root:password@localhost:3306/web?charset=utf8mb4
+
+# JWT 설정
 SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+
+# 애플리케이션 설정
 PROJECT_NAME=FastAPI Backend
 DEBUG=False
 ```

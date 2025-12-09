@@ -20,3 +20,7 @@ class CarPlateInfo(Base):
 
 
 
+
+
+
+

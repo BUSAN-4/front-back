@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, extract
+from sqlalchemy import func, and_, or_, extract
 from typing import List, Optional
 from datetime import datetime
 from app.database import get_busan_car_db, get_web_db
@@ -27,24 +27,25 @@ def calculate_drowsy_penalty(duration_sec: int) -> int:
     - 10초 이상: 감점 2점
     - 50초 이상: 감점 10점
     """
-    if duration_sec >= 50:
-        return 10
-    elif duration_sec >= 10:
-        return 2
-    elif duration_sec >= 5:
+    if duration_sec < 5:
+        return 0
+    elif duration_sec < 10:
         return 1
-    return 0
+    elif duration_sec < 50:
+        return 2
+    else:
+        return 10
 
 
 def calculate_rapid_penalty(total_count: int) -> int:
     """
     급가속/급감속 감점 계산
-    - 총계가 2 이상이면 감점 시작
-    - 총합 7번이면 감점 6점 (2 이상부터 카운트)
+    - 총계가 1 이상이면 감점 1점 누적
+    - 총합 7번이면 감점 7점
     """
-    if total_count < 2:
+    if total_count < 1:
         return 0
-    return total_count - 1  # 2 이상부터 카운트
+    return total_count  # 1 이상부터 1점씩 누적
 
 
 @router.get("/safety-score/monthly", response_model=List[dict])
@@ -79,12 +80,21 @@ async def get_monthly_safety_scores(
     # car_id와 license_plate 매핑 딕셔너리 생성
     car_id_to_plate = {v.car_id: v.license_plate for v in user_vehicles if v.car_id}
     
-    # 해당 월의 세션 조회 (end_time 기준, 사용자의 차량만)
+    # 해당 월의 세션 조회 (created_at 기준, 사용자의 차량만)
+    # created_at이 없으면 start_time 기준으로 조회
     sessions = busan_car_db.query(BusanCarDrivingSession).filter(
-        extract('year', BusanCarDrivingSession.end_time) == year,
-        extract('month', BusanCarDrivingSession.end_time) == month,
         BusanCarDrivingSession.car_id.in_(car_ids),
-        BusanCarDrivingSession.end_time.isnot(None)
+        or_(
+            and_(
+                extract('year', BusanCarDrivingSession.created_at) == year,
+                extract('month', BusanCarDrivingSession.created_at) == month
+            ),
+            and_(
+                BusanCarDrivingSession.created_at.is_(None),
+                extract('year', BusanCarDrivingSession.start_time) == year,
+                extract('month', BusanCarDrivingSession.start_time) == month
+            )
+        )
     ).all()
     
     results = []
@@ -112,47 +122,50 @@ async def get_monthly_safety_scores(
             yawn_flag_count += drowsy.yawn_flag or 0
         
         # 급가속/급감속 데이터 조회 (10분 단위로 그룹화)
-        # session_id별 info_id를 매칭하여 dt가 10분 단위로 그룹화
+        # session_id별 info_id를 매칭하여 createdDate가 10분 단위로 그룹화
         session_infos = busan_car_db.query(BusanCarDrivingSessionInfo).filter(
             BusanCarDrivingSessionInfo.session_id == session_id,
-            BusanCarDrivingSessionInfo.dt.isnot(None)
-        ).order_by(BusanCarDrivingSessionInfo.dt).all()
+            BusanCarDrivingSessionInfo.createdDate.isnot(None)
+        ).order_by(BusanCarDrivingSessionInfo.createdDate).all()
         
-        # 10분 단위로 그룹화하여 급가속/급감속 카운트
+        # 10분 단위로 그룹화하여 급가속/급감속 합계 계산
         rapid_penalty = 0
         current_10min_group = None
-        current_group_rapid_count = 0
+        current_group_acc_sum = 0  # 현재 그룹의 급가속 합계
+        current_group_deacc_sum = 0  # 현재 그룹의 급감속 합계
         
         for info in session_infos:
-            if info.dt:
+            if info.createdDate:
                 # 10분 단위로 그룹화 (분을 10으로 나눈 몫)
-                minute_group = info.dt.minute // 10
+                minute_group = info.createdDate.minute // 10
                 group_key = (
-                    info.dt.year,
-                    info.dt.month,
-                    info.dt.day,
-                    info.dt.hour,
+                    info.createdDate.year,
+                    info.createdDate.month,
+                    info.createdDate.day,
+                    info.createdDate.hour,
                     minute_group
                 )
                 
                 if current_10min_group != group_key:
                     # 새로운 10분 그룹 시작
                     if current_10min_group is not None:
-                        # 이전 그룹의 감점 계산 (총계가 2 이상이면 감점 시작)
-                        rapid_penalty += calculate_rapid_penalty(current_group_rapid_count)
+                        # 이전 그룹의 총합(급가속 + 급감속)을 총 감점에 추가
+                        group_total = current_group_acc_sum + current_group_deacc_sum
+                        rapid_penalty += group_total
                     current_10min_group = group_key
-                    current_group_rapid_count = 0
+                    current_group_acc_sum = 0
+                    current_group_deacc_sum = 0
                 
-                # 급가속/급감속 카운트 (각 info_id별로 카운트)
-                # app_rapid_acc과 app_rapid_deacc의 값이 1 이상이면 카운트
-                if info.app_rapid_acc and info.app_rapid_acc > 0:
-                    current_group_rapid_count += 1
-                if info.app_rapid_deacc and info.app_rapid_deacc > 0:
-                    current_group_rapid_count += 1
+                # 급가속/급감속 합계 계산 (각 10분 그룹 내에서 실제 값의 합계)
+                if info.app_rapid_acc:
+                    current_group_acc_sum += info.app_rapid_acc
+                if info.app_rapid_deacc:
+                    current_group_deacc_sum += info.app_rapid_deacc
         
-        # 마지막 그룹의 감점 계산
+        # 마지막 그룹의 총합을 총 감점에 추가
         if current_10min_group is not None:
-            rapid_penalty += calculate_rapid_penalty(current_group_rapid_count)
+            group_total = current_group_acc_sum + current_group_deacc_sum
+            rapid_penalty += group_total
         
         # 총 감점
         total_penalty = drowsy_penalty + rapid_penalty
@@ -242,59 +255,65 @@ async def get_session_safety_detail(
         })
     
     # 급가속/급감속 데이터 조회 (10분 단위로 그룹화)
-    # session_id별 info_id를 매칭하여 dt가 10분 단위로 그룹화
+    # session_id별 info_id를 매칭하여 createdDate가 10분 단위로 그룹화
     session_infos = busan_car_db.query(BusanCarDrivingSessionInfo).filter(
         BusanCarDrivingSessionInfo.session_id == session_id,
-        BusanCarDrivingSessionInfo.dt.isnot(None)
-    ).order_by(BusanCarDrivingSessionInfo.dt).all()
+        BusanCarDrivingSessionInfo.createdDate.isnot(None)
+    ).order_by(BusanCarDrivingSessionInfo.createdDate).all()
     
-    # 10분 단위로 그룹화하여 급가속/급감속 카운트
+    # 10분 단위로 그룹화하여 급가속/급감속 합계 계산
     rapid_penalty = 0
     current_10min_group = None
-    current_group_rapid_count = 0
+    current_group_acc_sum = 0  # 현재 그룹의 급가속 합계
+    current_group_deacc_sum = 0  # 현재 그룹의 급감속 합계
     rapid_details = []
     
     for info in session_infos:
-        if info.dt:
+        if info.createdDate:
             # 10분 단위로 그룹화
-            minute_group = info.dt.minute // 10
+            minute_group = info.createdDate.minute // 10
             group_key = (
-                info.dt.year,
-                info.dt.month,
-                info.dt.day,
-                info.dt.hour,
+                info.createdDate.year,
+                info.createdDate.month,
+                info.createdDate.day,
+                info.createdDate.hour,
                 minute_group
             )
             
             if current_10min_group != group_key:
                 # 새로운 10분 그룹 시작
                 if current_10min_group is not None:
-                    # 이전 그룹의 감점 계산 (총계가 2 이상이면 감점 시작)
-                    penalty = calculate_rapid_penalty(current_group_rapid_count)
-                    rapid_penalty += penalty
+                    # 이전 그룹의 총합(급가속 + 급감속)을 총 감점에 추가
+                    group_total = current_group_acc_sum + current_group_deacc_sum
+                    rapid_penalty += group_total
                     rapid_details.append({
                         "timeGroup": f"{current_10min_group[3]:02d}:{current_10min_group[4]*10:02d}",
-                        "rapidCount": current_group_rapid_count,
-                        "penalty": penalty,
+                        "rapidAccSum": current_group_acc_sum,
+                        "rapidDeaccSum": current_group_deacc_sum,
+                        "rapidCount": group_total,
+                        "penalty": group_total,
                         "infoIds": []  # 필요시 info_id 목록 추가 가능
                     })
                 current_10min_group = group_key
-                current_group_rapid_count = 0
+                current_group_acc_sum = 0
+                current_group_deacc_sum = 0
             
-            # 급가속/급감속 카운트 (각 info_id별로 카운트)
-            if info.app_rapid_acc and info.app_rapid_acc > 0:
-                current_group_rapid_count += 1
-            if info.app_rapid_deacc and info.app_rapid_deacc > 0:
-                current_group_rapid_count += 1
+            # 급가속/급감속 합계 계산 (각 10분 그룹 내에서 실제 값의 합계)
+            if info.app_rapid_acc:
+                current_group_acc_sum += info.app_rapid_acc
+            if info.app_rapid_deacc:
+                current_group_deacc_sum += info.app_rapid_deacc
     
-    # 마지막 그룹의 감점 계산
+    # 마지막 그룹의 총합을 총 감점에 추가
     if current_10min_group is not None:
-        penalty = calculate_rapid_penalty(current_group_rapid_count)
-        rapid_penalty += penalty
+        group_total = current_group_acc_sum + current_group_deacc_sum
+        rapid_penalty += group_total
         rapid_details.append({
             "timeGroup": f"{current_10min_group[3]:02d}:{current_10min_group[4]*10:02d}",
-            "rapidCount": current_group_rapid_count,
-            "penalty": penalty
+            "rapidAccSum": current_group_acc_sum,
+            "rapidDeaccSum": current_group_deacc_sum,
+            "rapidCount": group_total,
+            "penalty": group_total
         })
     
     # 총 감점

@@ -1,19 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import text, func
 from typing import List, Optional
-from app.database import get_db
+from datetime import datetime, date
+from app.database import get_web_db, web_engine
 from app.api.deps import require_system_admin
 from app.models.user import User, UserRole
+from app.models.user_log import UserLog, LogStatus
 from app.schemas.user import UserResponse
+from app.utils.logging import log_user_action, get_client_ip
 
 router = APIRouter()
 
 
 @router.get("/users", response_model=List[dict])
 async def get_all_users(
-    search: Optional[str] = Query(None, description="검색어 (username, name, email)"),
+    request: Request,
+    search: Optional[str] = Query(None, description="검색어 (name, email)"),
     current_user: User = Depends(require_system_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_web_db)
 ):
     """모든 사용자 조회 (시스템 관리자)"""
     query = db.query(User)
@@ -26,18 +31,104 @@ async def get_all_users(
         )
     
     users = query.all()
-    return [UserResponse.from_orm_user(user).dict() for user in users]
+    result = []
+    for user in users:
+        user_dict = UserResponse.from_orm_user(user).dict()
+        # 프론트엔드 형식에 맞게 필드명 변경
+        user_dict['created_at'] = user.created_at.isoformat() if user.created_at else None
+        user_dict['id'] = int(user_dict['id'])  # id를 숫자로 변환
+        user_dict['is_active'] = user.is_active if hasattr(user, 'is_active') else True
+        user_dict['updated_at'] = user.updated_at.isoformat() if user.updated_at else None
+        result.append(user_dict)
+    
+    # 로그 기록
+    action = f"사용자 목록 조회" + (f" (검색: {search})" if search else "")
+    log_user_action(
+        db=db,
+        action=action,
+        status=LogStatus.SUCCESS,
+        user=current_user,
+        ip_address=get_client_ip(request),
+        details=f"조회된 사용자 수: {len(result)}"
+    )
+    
+    return result
+
+
+@router.get("/stats", response_model=dict)
+async def get_system_stats(
+    current_user: User = Depends(require_system_admin),
+    db: Session = Depends(get_web_db)
+):
+    """시스템 통계 조회 (데이터베이스 크기, API 요청 수 등)"""
+    try:
+        # 오늘의 API 요청 수 (로그 수)
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        today_logs_count = db.query(func.count(UserLog.id)).filter(
+            UserLog.created_at >= today_start
+        ).scalar() or 0
+        
+        # 데이터베이스 크기 및 테이블 수 조회
+        db_size_mb = 0
+        table_count = 0
+        try:
+            with web_engine.connect() as connection:
+                # 데이터베이스 크기 조회 (MB)
+                result = connection.execute(text("""
+                    SELECT 
+                        ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
+                    FROM information_schema.tables 
+                    WHERE table_schema = DATABASE()
+                """))
+                size_row = result.fetchone()
+                if size_row and size_row[0]:
+                    db_size_mb = float(size_row[0])
+                
+                # 테이블 수 조회
+                result = connection.execute(text("""
+                    SELECT COUNT(*) 
+                    FROM information_schema.tables 
+                    WHERE table_schema = DATABASE()
+                    AND table_type = 'BASE TABLE'
+                """))
+                table_row = result.fetchone()
+                if table_row:
+                    table_count = int(table_row[0])
+        except Exception as e:
+            print(f"데이터베이스 통계 조회 오류: {e}")
+        
+        return {
+            "database_size_mb": round(db_size_mb, 2),
+            "table_count": table_count,
+            "today_api_requests": today_logs_count
+        }
+    except Exception as e:
+        # 오류 발생 시 기본값 반환
+        return {
+            "database_size_mb": 0,
+            "table_count": 0,
+            "today_api_requests": 0
+        }
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
+    request: Request,
     current_user: User = Depends(require_system_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_web_db)
 ):
     """사용자 삭제 (시스템 관리자)"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
+        log_user_action(
+            db=db,
+            action="사용자 삭제 시도",
+            status=LogStatus.ERROR,
+            user=current_user,
+            ip_address=get_client_ip(request),
+            details=f"사용자를 찾을 수 없음: user_id={user_id}"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -45,13 +136,36 @@ async def delete_user(
     
     # 자기 자신은 삭제 불가
     if user.id == current_user.id:
+        log_user_action(
+            db=db,
+            action="사용자 삭제 시도",
+            status=LogStatus.WARNING,
+            user=current_user,
+            ip_address=get_client_ip(request),
+            details="자기 자신 삭제 시도"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete yourself"
         )
     
+    # 삭제 전 사용자 정보 저장
+    deleted_user_email = user.email
+    deleted_user_name = user.name
+    
     db.delete(user)
     db.commit()
+    
+    # 로그 기록
+    log_user_action(
+        db=db,
+        action="사용자 삭제",
+        status=LogStatus.SUCCESS,
+        user=current_user,
+        ip_address=get_client_ip(request),
+        details=f"삭제된 사용자: {deleted_user_name} ({deleted_user_email})"
+    )
+    
     return None
 
 
@@ -59,12 +173,21 @@ async def delete_user(
 async def update_user_role(
     user_id: int,
     role: str,
+    request: Request,
     current_user: User = Depends(require_system_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_web_db)
 ):
     """사용자 권한 변경 (시스템 관리자)"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
+        log_user_action(
+            db=db,
+            action="사용자 권한 변경 시도",
+            status=LogStatus.ERROR,
+            user=current_user,
+            ip_address=get_client_ip(request),
+            details=f"사용자를 찾을 수 없음: user_id={user_id}"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -79,15 +202,128 @@ async def update_user_role(
     }
     
     if role not in role_map:
+        log_user_action(
+            db=db,
+            action="사용자 권한 변경 시도",
+            status=LogStatus.ERROR,
+            user=current_user,
+            ip_address=get_client_ip(request),
+            details=f"잘못된 권한 값: {role}"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid role"
         )
     
+    old_role = user.role.value
     user.role = role_map[role]
     db.commit()
     db.refresh(user)
     
     user_response = UserResponse.from_orm_user(user)
-    return user_response.dict()
+    user_dict = user_response.dict()
+    # 프론트엔드 형식에 맞게 필드명 변경
+    user_dict['created_at'] = user.created_at.isoformat() if user.created_at else None
+    user_dict['id'] = int(user_dict['id'])  # id를 숫자로 변환
+    user_dict['is_active'] = user.is_active if hasattr(user, 'is_active') else True
+    user_dict['updated_at'] = user.updated_at.isoformat() if user.updated_at else None
+    
+    # 로그 기록
+    log_user_action(
+        db=db,
+        action="사용자 권한 변경",
+        status=LogStatus.SUCCESS,
+        user=current_user,
+        ip_address=get_client_ip(request),
+        details=f"사용자: {user.name} ({user.email}), 권한 변경: {old_role} → {role}"
+    )
+    
+    return user_dict
+
+
+@router.get("/logs", response_model=List[dict])
+async def get_user_logs(
+    request: Request,
+    search: Optional[str] = Query(None, description="검색어 (username, action, ip)"),
+    status_filter: Optional[str] = Query(None, description="상태 필터 (success, error, warning)"),
+    start_date: Optional[datetime] = Query(None, description="시작 날짜"),
+    end_date: Optional[datetime] = Query(None, description="종료 날짜"),
+    limit: int = Query(100, description="최대 조회 개수"),
+    current_user: User = Depends(require_system_admin),
+    db: Session = Depends(get_web_db)
+):
+    """사용자 로그 조회 (시스템 관리자)"""
+    query = db.query(UserLog)
+    
+    # 검색 필터
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (UserLog.username.like(search_term)) |
+            (UserLog.action.like(search_term)) |
+            (UserLog.ip_address.like(search_term))
+        )
+    
+    # 상태 필터
+    if status_filter:
+        try:
+            status_enum = LogStatus(status_filter)
+            query = query.filter(UserLog.status == status_enum)
+        except ValueError:
+            pass  # 잘못된 상태 값은 무시
+    
+    # 날짜 필터
+    if start_date:
+        query = query.filter(UserLog.created_at >= start_date)
+    if end_date:
+        query = query.filter(UserLog.created_at <= end_date)
+    
+    # 정렬 및 제한
+    logs = query.order_by(UserLog.created_at.desc()).limit(limit).all()
+    
+    # 필터 정보 수집
+    filter_details = []
+    if search:
+        filter_details.append(f"검색: {search}")
+    if status_filter:
+        filter_details.append(f"상태: {status_filter}")
+    if start_date:
+        filter_details.append(f"시작일: {start_date.strftime('%Y-%m-%d')}")
+    if end_date:
+        filter_details.append(f"종료일: {end_date.strftime('%Y-%m-%d')}")
+    filter_details.append(f"제한: {limit}")
+    
+    # 로그 기록
+    action = "로그 조회" + (f" ({', '.join(filter_details)})" if filter_details else "")
+    log_user_action(
+        db=db,
+        action=action,
+        status=LogStatus.SUCCESS,
+        user=current_user,
+        ip_address=get_client_ip(request),
+        details=f"조회된 로그 수: {len(logs)}"
+    )
+    
+    # user_id를 통해 users 테이블에서 email 가져오기
+    result = []
+    for log in logs:
+        email = None
+        if log.user_id:
+            user = db.query(User).filter(User.id == log.user_id).first()
+            if user:
+                email = user.email
+        
+        result.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "username": log.username or "알 수 없음",
+            "email": email or "알 수 없음",
+            "action": log.action,
+            "timestamp": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else None,
+            "ip": log.ip_address or "알 수 없음",
+            "status": log.status.value,
+            "details": log.details
+        })
+    
+    return result
 

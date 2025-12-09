@@ -3,15 +3,21 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_, extract, text
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
-from app.database import get_db
+from app.database import get_busan_car_db, get_web_db
 from app.api.deps import require_busan_admin
 from app.models.user import User
 from app.models.missing_person_detection import MissingPersonDetection
+from app.models.missing_person_info import MissingPersonInfo
 from app.models.arrears_detection import ArrearsDetection
-from app.models.drowsy_drive import DrowsyDrive
-from app.models.driving_session import DrivingSession
-from app.models.driving_session_info import DrivingSessionInfo
-from app.models.user_vehicle import UserVehicle
+from app.models.arrears_info import ArrearsInfo
+from app.models.missing_person_detection_modification import MissingPersonDetectionModification
+from app.models.arrears_detection_modification import ArrearsDetectionModification
+from app.models.busan_car_models import (
+    BusanCarDrivingSession,
+    BusanCarDrivingSessionInfo,
+    BusanCarDrowsyDrive,
+    BusanCarUserVehicle
+)
 
 router = APIRouter()
 
@@ -20,7 +26,7 @@ router = APIRouter()
 async def get_missing_person_detections(
     missing_id: Optional[str] = Query(None, description="실종자 ID로 필터링"),
     current_user: User = Depends(require_busan_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """실종자 탐지 조회 (missing_person_detection 테이블)"""
     query = db.query(MissingPersonDetection)
@@ -37,16 +43,122 @@ async def get_missing_person_detections(
         "detectionSuccess": bool(d.detection_success),
         "detectedLat": d.detected_lat,
         "detectedLon": d.detected_lon,
-        "detectedTime": d.detected_time.isoformat() if d.detected_time else None,
-        "detectedAt": d.detected_at
+        "detectedTime": d.detected_time.isoformat() if d.detected_time else None
     } for d in detections]
+
+
+@router.get("/missing-person/stats", response_model=dict)
+async def get_missing_person_stats(
+    current_user: User = Depends(require_busan_admin),
+    busan_car_db: Session = Depends(get_busan_car_db),
+    web_db: Session = Depends(get_web_db)
+):
+    """
+    실종자 통계 조회 (부산시청 관리자용)
+    - 이번달 실종 신고 수 (missing_person_info 테이블의 registered_at 기준)
+    - 이번달 실종자 탐지 수 (missing_person_detection에서 detection_success = 1)
+    - 해결률 (해결완료 수 / 신고 수 * 100)
+    """
+    now = datetime.now()
+    month_start = datetime(now.year, now.month, 1, 0, 0, 0)
+    if now.month == 12:
+        month_end = datetime(now.year + 1, 1, 1, 0, 0, 0)
+    else:
+        month_end = datetime(now.year, now.month + 1, 1, 0, 0, 0)
+    
+    # 이번달 실종 신고 수 (missing_person_info의 registered_at 기준)
+    monthly_reports = busan_car_db.query(func.count(MissingPersonInfo.missing_id)).filter(
+        MissingPersonInfo.registered_at >= month_start,
+        MissingPersonInfo.registered_at < month_end
+    ).scalar() or 0
+    
+    # 이번달 실종자 탐지 수 (missing_person_detection에서 detection_success = 1인 것만)
+    monthly_found = busan_car_db.query(func.count(MissingPersonDetection.detection_id)).filter(
+        MissingPersonDetection.detected_time >= month_start,
+        MissingPersonDetection.detected_time < month_end,
+        MissingPersonDetection.detection_success == 1
+    ).scalar() or 0
+    
+    # 해결완료 수 (web DB에서 is_resolved = True인 것)
+    resolved_count = web_db.query(func.count(MissingPersonDetectionModification.id)).filter(
+        MissingPersonDetectionModification.is_resolved == True,
+        MissingPersonDetectionModification.resolved_at >= month_start,
+        MissingPersonDetectionModification.resolved_at < month_end
+    ).scalar() or 0
+    
+    # 해결률 계산 (해결완료 수 / 신고 수 * 100)
+    resolution_rate = 0
+    if monthly_reports > 0:
+        resolution_rate = round((resolved_count / monthly_reports) * 100, 1)
+    
+    # 월별 추이 (최근 7개월)
+    monthly_trend = []
+    month_list = []
+    for i in range(6, -1, -1):  # 6개월 전부터 현재까지
+        target_year = now.year
+        target_month = now.month - i
+        while target_month <= 0:
+            target_month += 12
+            target_year -= 1
+        while target_month > 12:
+            target_month -= 12
+            target_year += 1
+        month_list.append((target_year, target_month))
+    
+    for year, month in month_list:
+        month_start = datetime(year, month, 1, 0, 0, 0)
+        if month == 12:
+            month_end = datetime(year + 1, 1, 1, 0, 0, 0)
+        else:
+            month_end = datetime(year, month + 1, 1, 0, 0, 0)
+        
+        # 해당 월의 실종 신고 수
+        month_reports = busan_car_db.query(func.count(MissingPersonInfo.missing_id)).filter(
+            MissingPersonInfo.registered_at >= month_start,
+            MissingPersonInfo.registered_at < month_end
+        ).scalar() or 0
+        
+        # 해당 월의 실종자 탐지 수 (detection_success = 1인 것만)
+        month_found = busan_car_db.query(func.count(MissingPersonDetection.detection_id)).filter(
+            MissingPersonDetection.detected_time >= month_start,
+            MissingPersonDetection.detected_time < month_end,
+            MissingPersonDetection.detection_success == 1
+        ).scalar() or 0
+        
+        # 해당 월의 해결완료 수
+        month_resolved = web_db.query(func.count(MissingPersonDetectionModification.id)).filter(
+            MissingPersonDetectionModification.is_resolved == True,
+            MissingPersonDetectionModification.resolved_at >= month_start,
+            MissingPersonDetectionModification.resolved_at < month_end
+        ).scalar() or 0
+        
+        # 해결률 계산
+        month_resolution_rate = 0
+        if month_reports > 0:
+            month_resolution_rate = round((month_resolved / month_reports) * 100, 1)
+        
+        monthly_trend.append({
+            "month": f"{year}-{month:02d}",
+            "reports": month_reports,
+            "found": month_found,
+            "resolved": month_resolved,
+            "resolutionRate": month_resolution_rate
+        })
+    
+    return {
+        "monthlyReports": monthly_reports,
+        "monthlyFound": monthly_found,
+        "resolutionRate": resolution_rate,
+        "resolvedCount": resolved_count,
+        "monthlyTrend": monthly_trend
+    }
 
 
 @router.get("/arrears", response_model=List[dict])
 async def get_arrears_detections(
     car_plate_number: Optional[str] = Query(None, description="차량 번호로 필터링"),
     current_user: User = Depends(require_busan_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """체납 차량 탐지 조회 (arrears_detection 테이블)"""
     query = db.query(ArrearsDetection)
@@ -67,27 +179,177 @@ async def get_arrears_detections(
     } for d in detections]
 
 
+@router.get("/arrears/detections/today", response_model=List[dict])
+async def get_today_arrears_detections(
+    current_user: User = Depends(require_busan_admin),
+    db: Session = Depends(get_busan_car_db)
+):
+    """
+    오늘 탐지된 체납 차량 목록 조회 (부산시청 관리자용)
+    arrears_detection과 arrears_info를 조인하여 체납 금액, 기간 등 정보 포함
+    """
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+    today_end = datetime(now.year, now.month, now.day, 23, 59, 59)
+    
+    # 오늘 탐지된 체납 차량 조회 (arrears_detection과 arrears_info 조인)
+    detections = db.query(
+        ArrearsDetection,
+        ArrearsInfo
+    ).outerjoin(
+        ArrearsInfo, ArrearsDetection.car_plate_number == ArrearsInfo.car_plate_number
+    ).filter(
+        ArrearsDetection.detected_time >= today_start,
+        ArrearsDetection.detected_time <= today_end
+    ).order_by(ArrearsDetection.detected_time.desc()).all()
+    
+    result = []
+    for detection, info in detections:
+        # 위치 정보 생성
+        location = "위치 정보 없음"
+        if detection.detected_lat and detection.detected_lon:
+            location = f"위도: {detection.detected_lat:.6f}, 경도: {detection.detected_lon:.6f}"
+        
+        result.append({
+            "detectionId": detection.detection_id,
+            "carPlateNumber": detection.car_plate_number or "알 수 없음",
+            "detectedLat": detection.detected_lat,
+            "detectedLon": detection.detected_lon,
+            "detectedTime": detection.detected_time.isoformat() if detection.detected_time else None,
+            "location": location,
+            "detectionSuccess": bool(detection.detection_success) if detection.detection_success is not None else None,
+            "totalArrearsAmount": info.total_arrears_amount if info else None,
+            "arrearsPeriod": info.arrears_period if info else None,
+            "noticeSent": bool(info.notice_sent) if info and info.notice_sent is not None else False
+        })
+    
+    return result
+
+
+@router.get("/arrears/stats", response_model=dict)
+async def get_arrears_stats(
+    current_user: User = Depends(require_busan_admin),
+    busan_car_db: Session = Depends(get_busan_car_db),
+    web_db: Session = Depends(get_web_db)
+):
+    """
+    체납자 통계 조회 (부산시청 관리자용)
+    - 오늘 탐지된 체납 차량 수
+    - 월별 신규 체납자 추이 (최근 7개월)
+    - 총 체납 금액 (arrears_info 테이블의 total_arrears_amount 합계)
+    - 해결률 (해결완료 수 / 신규 체납자 수 * 100)
+    """
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+    today_end = datetime(now.year, now.month, now.day, 23, 59, 59)
+    
+    # 오늘 탐지된 체납 차량 수
+    today_detected = busan_car_db.query(func.count(ArrearsDetection.detection_id)).filter(
+        ArrearsDetection.detected_time >= today_start,
+        ArrearsDetection.detected_time <= today_end
+    ).scalar() or 0
+    
+    # 총 체납 금액 (arrears_info 테이블의 total_arrears_amount 합계)
+    total_amount = busan_car_db.query(func.sum(ArrearsInfo.total_arrears_amount)).scalar() or 0
+    
+    # 월별 신규 체납자 추이 (최근 7개월)
+    # arrears_info 테이블의 arrears_period 컬럼에서 시작 월 추출하여 집계
+    # SQL: SELECT SUBSTRING_INDEX(arrears_period, '~', 1) AS start_month, COUNT(*) FROM arrears_info GROUP BY start_month
+    monthly_trend = []
+    
+    # 최근 7개월 목록 생성
+    month_list = []
+    for i in range(6, -1, -1):  # 6개월 전부터 현재까지
+        target_year = now.year
+        target_month = now.month - i
+        
+        # 월이 음수가 되면 이전 년도로 조정
+        while target_month <= 0:
+            target_month += 12
+            target_year -= 1
+        while target_month > 12:
+            target_month -= 12
+            target_year += 1
+        
+        month_list.append(f"{target_year}.{target_month:02d}")
+    
+    # arrears_info 테이블에서 월별 신규 체납자 집계 (arrears_period의 시작 월 기준)
+    query = text("""
+        SELECT 
+            SUBSTRING_INDEX(arrears_period, '~', 1) AS start_month,
+            COUNT(*) AS new_arrears_count
+        FROM arrears_info
+        WHERE arrears_period IS NOT NULL
+        GROUP BY start_month
+        ORDER BY start_month DESC
+    """)
+    
+    result = busan_car_db.execute(query)
+    monthly_data = {row[0]: row[1] for row in result.fetchall()}
+    
+    # 최근 7개월에 대해 데이터 구성 (없는 월은 0으로)
+    for month_str in month_list:
+        monthly_trend.append({
+            "month": month_str.replace('.', '-'),  # "2025.12" -> "2025-12" 형식으로 변환
+            "count": monthly_data.get(month_str, 0)
+        })
+    
+    # 이번달 해결완료 수 (web DB에서 is_resolved = True인 것)
+    month_start = datetime(now.year, now.month, 1, 0, 0, 0)
+    if now.month == 12:
+        month_end = datetime(now.year + 1, 1, 1, 0, 0, 0)
+    else:
+        month_end = datetime(now.year, now.month + 1, 1, 0, 0, 0)
+    
+    resolved_count = web_db.query(func.count(ArrearsDetectionModification.id)).filter(
+        ArrearsDetectionModification.is_resolved == True,
+        ArrearsDetectionModification.resolved_at >= month_start,
+        ArrearsDetectionModification.resolved_at < month_end
+    ).scalar() or 0
+    
+    # 이번달 신규 체납자 수 (arrears_period가 이번달인 것)
+    current_month_str = f"{now.year}.{now.month:02d}"
+    monthly_new = busan_car_db.execute(text("""
+        SELECT COUNT(*) 
+        FROM arrears_info 
+        WHERE SUBSTRING_INDEX(arrears_period, '~', 1) = :month_str
+    """), {"month_str": current_month_str}).scalar() or 0
+    
+    # 해결률 계산 (해결완료 수 / 신규 체납자 수 * 100)
+    resolution_rate = 0
+    if monthly_new > 0:
+        resolution_rate = round((resolved_count / monthly_new) * 100, 1)
+    
+    return {
+        "todayDetected": today_detected,
+        "totalAmount": int(total_amount),
+        "monthlyTrend": monthly_trend,
+        "resolvedCount": resolved_count,
+        "resolutionRate": resolution_rate
+    }
+
+
 @router.get("/drowsy-drive", response_model=List[dict])
 async def get_drowsy_drive_detections(
     session_id: Optional[str] = Query(None, description="세션 ID로 필터링"),
     start_date: Optional[datetime] = Query(None, description="시작 날짜"),
     end_date: Optional[datetime] = Query(None, description="종료 날짜"),
     current_user: User = Depends(require_busan_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """운전자 운전태도(졸음운전) 실시간 탐지 조회 (drowsy_drive 테이블)"""
-    query = db.query(DrowsyDrive)
+    query = db.query(BusanCarDrowsyDrive)
     
     if session_id:
-        query = query.filter(DrowsyDrive.session_id == session_id)
+        query = query.filter(BusanCarDrowsyDrive.session_id == session_id)
     
     if start_date:
-        query = query.filter(DrowsyDrive.detected_at >= start_date)
+        query = query.filter(BusanCarDrowsyDrive.detected_at >= start_date)
     
     if end_date:
-        query = query.filter(DrowsyDrive.detected_at <= end_date)
+        query = query.filter(BusanCarDrowsyDrive.detected_at <= end_date)
     
-    detections = query.order_by(DrowsyDrive.detected_at.desc()).all()
+    detections = query.order_by(BusanCarDrowsyDrive.detected_at.desc()).all()
     
     return [{
         "drowsyId": d.drowsy_id,
@@ -109,35 +371,36 @@ async def get_drowsy_drive_detections(
 @router.get("/safe-driving/sample-car-ids", response_model=List[str])
 async def get_sample_car_ids(
     limit: int = Query(10, description="샘플 개수"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """실제 DB에 있는 car_id 샘플 조회 (디버깅용)"""
-    car_ids = db.query(UserVehicle.car_id).limit(limit).all()
+    car_ids = db.query(BusanCarUserVehicle.car_id).limit(limit).all()
     return [row.car_id for row in car_ids if row.car_id]
 
 
 @router.get("/safe-driving/stats", response_model=dict)
 async def get_safe_driving_stats(
+    year: Optional[int] = Query(None, description="연도 (예: 2024), None이면 현재 연도"),
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """안전운전 주요 지표 조회 (주행 차량 수, 전체 안전운전율)"""
     now = datetime.now()
     target_month = month if month else now.month
-    target_year = now.year
+    target_year = year if year else now.year
     
     # 현재 주행 중인 차량 수 (end_time이 NULL이거나 미래인 세션)
-    active_sessions = db.query(DrivingSession).filter(
+    active_sessions = db.query(BusanCarDrivingSession).filter(
         or_(
-            DrivingSession.end_time.is_(None),
-            DrivingSession.end_time > now
+            BusanCarDrivingSession.end_time.is_(None),
+            BusanCarDrivingSession.end_time > now
         )
     ).count()
     
     # 해당 월의 전체 세션 수
-    month_sessions = db.query(DrivingSession).filter(
-        extract('year', DrivingSession.start_time) == target_year,
-        extract('month', DrivingSession.start_time) == target_month
+    month_sessions = db.query(BusanCarDrivingSession).filter(
+        extract('year', BusanCarDrivingSession.start_time) == target_year,
+        extract('month', BusanCarDrivingSession.start_time) == target_month
     ).count()
     
     # 해당 월의 안전운전 데이터 집계
@@ -147,35 +410,38 @@ async def get_safe_driving_stats(
     else:
         month_end = datetime(target_year, target_month + 1, 1)
     
-    # 급가속, 급감속, 졸음운전 집계
-    rapid_acc_count = db.query(func.count(DrivingSessionInfo.info_id)).join(
-        DrivingSession, DrivingSessionInfo.session_id == DrivingSession.session_id
+    # 급가속, 급감속, 졸음운전 집계 (dt 기준)
+    rapid_acc_count = db.query(func.count(BusanCarDrivingSessionInfo.info_id)).join(
+        BusanCarDrivingSession, BusanCarDrivingSessionInfo.session_id == BusanCarDrivingSession.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end,
-        DrivingSessionInfo.app_rapid_acc > 0
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        BusanCarDrivingSessionInfo.app_rapid_acc > 0
     ).scalar() or 0
     
-    rapid_deacc_count = db.query(func.count(DrivingSessionInfo.info_id)).join(
-        DrivingSession, DrivingSessionInfo.session_id == DrivingSession.session_id
+    rapid_deacc_count = db.query(func.count(BusanCarDrivingSessionInfo.info_id)).join(
+        BusanCarDrivingSession, BusanCarDrivingSessionInfo.session_id == BusanCarDrivingSession.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end,
-        DrivingSessionInfo.app_rapid_deacc > 0
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        BusanCarDrivingSessionInfo.app_rapid_deacc > 0
     ).scalar() or 0
     
-    drowsy_count = db.query(func.count(DrowsyDrive.drowsy_id)).filter(
-        DrowsyDrive.detected_at >= month_start,
-        DrowsyDrive.detected_at < month_end,
-        DrowsyDrive.abnormal_flag > 0
+    drowsy_count = db.query(func.count(BusanCarDrowsyDrive.drowsy_id)).filter(
+        BusanCarDrowsyDrive.detected_at >= month_start,
+        BusanCarDrowsyDrive.detected_at < month_end,
+        BusanCarDrowsyDrive.abnormal_flag > 0
     ).scalar() or 0
     
-    # 전체 데이터 포인트 수 (실제 driving_session_info 레코드 수)
-    total_data_points = db.query(func.count(DrivingSessionInfo.info_id)).join(
-        DrivingSession, DrivingSessionInfo.session_id == DrivingSession.session_id
+    # 전체 데이터 포인트 수 (실제 driving_session_info 레코드 수, dt 기준)
+    total_data_points = db.query(func.count(BusanCarDrivingSessionInfo.info_id)).join(
+        BusanCarDrivingSession, BusanCarDrivingSessionInfo.session_id == BusanCarDrivingSession.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None)
     ).scalar() or 1
     
     # 안전운전율 계산 (100 - (위험 행동 비율 * 100))
@@ -198,7 +464,7 @@ async def get_safe_driving_stats(
 @router.get("/safe-driving/districts", response_model=List[dict])
 async def get_district_safe_driving(
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """구별 안전운전 현황 조회"""
     now = datetime.now()
@@ -215,24 +481,25 @@ async def get_district_safe_driving(
     # user_location 형식: "부산시 해운대구" 또는 "해운대구"
     # Python에서 구 추출 후 집계 (더 정확한 처리)
     
-    # 먼저 모든 데이터를 가져와서 Python에서 처리
+    # 먼저 모든 데이터를 가져와서 Python에서 처리 (dt 기준)
     district_data = db.query(
-        UserVehicle.user_location,
-        DrivingSessionInfo.app_rapid_acc,
-        DrivingSessionInfo.app_rapid_deacc,
-        DrowsyDrive.abnormal_flag,
-        DrivingSession.session_id
+        BusanCarUserVehicle.user_location,
+        BusanCarDrivingSessionInfo.app_rapid_acc,
+        BusanCarDrivingSessionInfo.app_rapid_deacc,
+        BusanCarDrowsyDrive.abnormal_flag,
+        BusanCarDrivingSession.session_id
     ).join(
-        DrivingSession, UserVehicle.car_id == DrivingSession.car_id
+        BusanCarDrivingSession, BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
     ).join(
-        DrivingSessionInfo, DrivingSession.session_id == DrivingSessionInfo.session_id
+        BusanCarDrivingSessionInfo, BusanCarDrivingSession.session_id == BusanCarDrivingSessionInfo.session_id
     ).outerjoin(
-        DrowsyDrive, DrivingSession.session_id == DrowsyDrive.session_id
+        BusanCarDrowsyDrive, BusanCarDrivingSession.session_id == BusanCarDrowsyDrive.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end,
-        UserVehicle.user_location.isnot(None),
-        UserVehicle.user_location.like('%구%')
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        BusanCarUserVehicle.user_location.isnot(None),
+        BusanCarUserVehicle.user_location.like('%구%')
     ).all()
     
     # 구별로 집계
@@ -316,7 +583,7 @@ async def get_district_safe_driving(
 @router.get("/safe-driving/demographics", response_model=List[dict])
 async def get_demographics_safe_driving(
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """성별, 연령별 운전습관 조회"""
     now = datetime.now()
@@ -331,32 +598,33 @@ async def get_demographics_safe_driving(
     
     # 연령대 그룹화 함수
     age_group = case(
-        (and_(UserVehicle.age >= 20, UserVehicle.age < 30), '20대'),
-        (and_(UserVehicle.age >= 30, UserVehicle.age < 40), '30대'),
-        (and_(UserVehicle.age >= 40, UserVehicle.age < 50), '40대'),
-        (UserVehicle.age >= 50, '50대 이상'),
+        (and_(BusanCarUserVehicle.age >= 20, BusanCarUserVehicle.age < 30), '20대'),
+        (and_(BusanCarUserVehicle.age >= 30, BusanCarUserVehicle.age < 40), '30대'),
+        (and_(BusanCarUserVehicle.age >= 40, BusanCarUserVehicle.age < 50), '40대'),
+        (BusanCarUserVehicle.age >= 50, '50대 이상'),
         else_='기타'
     )
     
     demographics = db.query(
-        UserVehicle.user_sex.label('gender'),
+        BusanCarUserVehicle.user_sex.label('gender'),
         age_group.label('age_group'),
-        func.count(func.distinct(DrivingSession.session_id)).label('session_count'),
-        func.count(DrivingSessionInfo.info_id).label('total_data_points'),
-        func.sum(case((DrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
-        func.sum(case((DrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
-        func.sum(case((DrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy')
+        func.count(func.distinct(BusanCarDrivingSession.session_id)).label('session_count'),
+        func.count(BusanCarDrivingSessionInfo.info_id).label('total_data_points'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
+        func.sum(case((BusanCarDrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy')
     ).join(
-        DrivingSession, UserVehicle.car_id == DrivingSession.car_id
+        BusanCarDrivingSession, BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
     ).join(
-        DrivingSessionInfo, DrivingSession.session_id == DrivingSessionInfo.session_id
+        BusanCarDrivingSessionInfo, BusanCarDrivingSession.session_id == BusanCarDrivingSessionInfo.session_id
     ).outerjoin(
-        DrowsyDrive, DrivingSession.session_id == DrowsyDrive.session_id
+        BusanCarDrowsyDrive, BusanCarDrivingSession.session_id == BusanCarDrowsyDrive.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end,
-        UserVehicle.user_sex.isnot(None),
-        UserVehicle.age.isnot(None)
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        BusanCarUserVehicle.user_sex.isnot(None),
+        BusanCarUserVehicle.age.isnot(None)
     ).group_by('gender', 'age_group').all()
     
     result = []
@@ -394,7 +662,7 @@ async def get_demographics_safe_driving(
 async def get_best_drivers(
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
     limit: int = Query(5, description="상위 N명"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """베스트 드라이버 조회 (급가속, 급감속, 운전자태도 기준)"""
     now = datetime.now()
@@ -407,26 +675,27 @@ async def get_best_drivers(
     else:
         month_end = datetime(target_year, target_month + 1, 1)
     
-    # 차량별 안전운전 점수 계산
+    # 차량별 안전운전 점수 계산 (dt 기준)
     driver_scores = db.query(
-        UserVehicle.car_id,
-        func.count(func.distinct(DrivingSession.session_id)).label('session_count'),
-        func.count(DrivingSessionInfo.info_id).label('total_data_points'),
-        func.sum(case((DrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
-        func.sum(case((DrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
-        func.sum(case((DrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy'),
-        func.sum(case((DrivingSessionInfo.app_travel == 1, 1), else_=0)).label('total_travel'),
-        UserVehicle.user_location
+        BusanCarUserVehicle.car_id,
+        func.count(func.distinct(BusanCarDrivingSession.session_id)).label('session_count'),
+        func.count(BusanCarDrivingSessionInfo.info_id).label('total_data_points'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
+        func.sum(case((BusanCarDrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_travel == 1, 1), else_=0)).label('total_travel'),
+        BusanCarUserVehicle.user_location
     ).join(
-        DrivingSession, UserVehicle.car_id == DrivingSession.car_id
+        BusanCarDrivingSession, BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
     ).join(
-        DrivingSessionInfo, DrivingSession.session_id == DrivingSessionInfo.session_id
+        BusanCarDrivingSessionInfo, BusanCarDrivingSession.session_id == BusanCarDrivingSessionInfo.session_id
     ).outerjoin(
-        DrowsyDrive, DrivingSession.session_id == DrowsyDrive.session_id
+        BusanCarDrowsyDrive, BusanCarDrivingSession.session_id == BusanCarDrowsyDrive.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end
-    ).group_by(UserVehicle.car_id, UserVehicle.user_location).all()
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None)
+    ).group_by(BusanCarUserVehicle.car_id, BusanCarUserVehicle.user_location).all()
     
     result = []
     for row in driver_scores:
@@ -486,7 +755,7 @@ async def get_best_drivers(
 @router.get("/safe-driving/hourly", response_model=List[dict])
 async def get_hourly_safe_driving(
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """시간대별 안전운전률 조회"""
     now = datetime.now()
@@ -501,31 +770,32 @@ async def get_hourly_safe_driving(
     
     # 시간대 그룹화
     hour_group = case(
-        (and_(DrivingSessionInfo.Hour >= 0, DrivingSessionInfo.Hour < 6), '00-06시'),
-        (and_(DrivingSessionInfo.Hour >= 6, DrivingSessionInfo.Hour < 9), '06-09시'),
-        (and_(DrivingSessionInfo.Hour >= 9, DrivingSessionInfo.Hour < 12), '09-12시'),
-        (and_(DrivingSessionInfo.Hour >= 12, DrivingSessionInfo.Hour < 15), '12-15시'),
-        (and_(DrivingSessionInfo.Hour >= 15, DrivingSessionInfo.Hour < 18), '15-18시'),
-        (and_(DrivingSessionInfo.Hour >= 18, DrivingSessionInfo.Hour < 21), '18-21시'),
-        (DrivingSessionInfo.Hour >= 21, '21-24시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 0, BusanCarDrivingSessionInfo.Hour < 6), '00-06시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 6, BusanCarDrivingSessionInfo.Hour < 9), '06-09시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 9, BusanCarDrivingSessionInfo.Hour < 12), '09-12시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 12, BusanCarDrivingSessionInfo.Hour < 15), '12-15시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 15, BusanCarDrivingSessionInfo.Hour < 18), '15-18시'),
+        (and_(BusanCarDrivingSessionInfo.Hour >= 18, BusanCarDrivingSessionInfo.Hour < 21), '18-21시'),
+        (BusanCarDrivingSessionInfo.Hour >= 21, '21-24시'),
         else_='기타'
     )
     
     hourly_stats = db.query(
         hour_group.label('hour_range'),
-        func.count(func.distinct(DrivingSession.session_id)).label('driving_count'),
-        func.count(DrivingSessionInfo.info_id).label('total_data_points'),
-        func.sum(case((DrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
-        func.sum(case((DrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
-        func.sum(case((DrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy')
+        func.count(func.distinct(BusanCarDrivingSession.session_id)).label('driving_count'),
+        func.count(BusanCarDrivingSessionInfo.info_id).label('total_data_points'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_acc > 0, 1), else_=0)).label('rapid_acc'),
+        func.sum(case((BusanCarDrivingSessionInfo.app_rapid_deacc > 0, 1), else_=0)).label('rapid_deacc'),
+        func.sum(case((BusanCarDrowsyDrive.abnormal_flag > 0, 1), else_=0)).label('drowsy')
     ).join(
-        DrivingSession, DrivingSessionInfo.session_id == DrivingSession.session_id
+        BusanCarDrivingSession, BusanCarDrivingSessionInfo.session_id == BusanCarDrivingSession.session_id
     ).outerjoin(
-        DrowsyDrive, DrivingSession.session_id == DrowsyDrive.session_id
+        BusanCarDrowsyDrive, BusanCarDrivingSession.session_id == BusanCarDrowsyDrive.session_id
     ).filter(
-        DrivingSession.start_time >= month_start,
-        DrivingSession.start_time < month_end,
-        DrivingSessionInfo.Hour.isnot(None)
+        BusanCarDrivingSession.start_time >= month_start,
+        BusanCarDrivingSession.start_time < month_end,
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        BusanCarDrivingSessionInfo.Hour.isnot(None)
     ).group_by('hour_range').all()
     
     result = []
@@ -565,7 +835,7 @@ async def get_hourly_safe_driving(
 @router.get("/safe-driving/top-drowsy-session", response_model=dict)
 async def get_top_drowsy_session(
     month: Optional[int] = Query(None, description="월 (1-12), None이면 현재 월"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """gaze_closure 총 횟수가 가장 많은 session_id 조회"""
     now = datetime.now()
@@ -580,15 +850,15 @@ async def get_top_drowsy_session(
     
     # session_id별 gaze_closure 총합 계산
     top_session = db.query(
-        DrowsyDrive.session_id,
-        func.sum(DrowsyDrive.gaze_closure).label('total_gaze_closure'),
-        func.count(DrowsyDrive.drowsy_id).label('detection_count')
+        BusanCarDrowsyDrive.session_id,
+        func.sum(BusanCarDrowsyDrive.gaze_closure).label('total_gaze_closure'),
+        func.count(BusanCarDrowsyDrive.drowsy_id).label('detection_count')
     ).filter(
-        DrowsyDrive.detected_at >= month_start,
-        DrowsyDrive.detected_at < month_end,
-        DrowsyDrive.gaze_closure.isnot(None)
-    ).group_by(DrowsyDrive.session_id).order_by(
-        func.sum(DrowsyDrive.gaze_closure).desc()
+        BusanCarDrowsyDrive.detected_at >= month_start,
+        BusanCarDrowsyDrive.detected_at < month_end,
+        BusanCarDrowsyDrive.gaze_closure.isnot(None)
+    ).group_by(BusanCarDrowsyDrive.session_id).order_by(
+        func.sum(BusanCarDrowsyDrive.gaze_closure).desc()
     ).first()
     
     if top_session:
@@ -613,20 +883,16 @@ async def get_top_drowsy_session(
 async def get_best_drivers_monthly(
     year: int = Query(..., description="연도 (예: 2024)"),
     month: int = Query(..., description="월 (1-12)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_busan_car_db)
 ):
     """
-    월별 베스트 드라이버 Top 10 조회 (createdDate 기준)
+    월별 베스트 드라이버 Top 10 조회 (발생률 기반 점수 계산)
     
-    점수 계산 기준:
-    - 급가속 (app_rapid_acc) - 낮을수록 좋음
-    - 급감속 (app_rapid_deacc) - 낮을수록 좋음
-    - 눈 감음 횟수 (gaze_closure) - 낮을수록 좋음
-    
-    점수 = 1000 - (급가속 합계 + 급감속 합계 + 눈감음 합계) * 가중치
+    점수 계산 방식:
+    - 급가속, 급감속, 눈감음 총합을 세션 수로 나눈 발생률 계산
+    - 발생률이 낮을수록 높은 점수 (1000점 만점)
+    - 발생률 0.0 = 1000점, 발생률 1.0 = 0점
     """
-    # 월별 베스트 드라이버를 계산하는 SQL 쿼리 (createdDate 기준)
-    # MySQL에서는 ORDER BY에서 별칭을 직접 사용할 수 없으므로 집계 함수를 다시 사용
     query = text("""
         SELECT 
             ds.car_id,

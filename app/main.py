@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from app.api import auth, users, vehicles, trips, city, admin, test, user_safety  # test 추가
+from app.api import auth, users, vehicles, trips, city, admin, test, user_safety, nts, police  # test 추가
 from app.database import busan_car_engine, BusanCarSessionLocal
 
 app = FastAPI(
@@ -63,6 +63,8 @@ app.include_router(city.router, prefix="/api/city", tags=["city"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(test.router, prefix="/api/test", tags=["test"])  # 추가
 app.include_router(user_safety.router, prefix="/api/user", tags=["user-safety"])
+app.include_router(nts.router, prefix="/api/nts", tags=["nts"])
+app.include_router(police.router, prefix="/api/police", tags=["police"])
 
 
 @app.get("/")
