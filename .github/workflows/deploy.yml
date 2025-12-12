@@ -11,7 +11,7 @@ env:
   AWS_REGION: ap-northeast-2
   BACKEND_REPOSITORY: backend
   FRONTEND_REPOSITORY: frontend
-  EKS_CLUSTER_NAME: busan-project
+  EKS_CLUSTER_NAME: busan
 
 jobs:
   build-and-push:
