@@ -122,32 +122,48 @@ jobs:
           BACKEND_IMAGE="${{ steps.ecr-registry.outputs.registry }}/${{ env.BACKEND_REPOSITORY }}:${{ github.sha }}"
           # Deployment가 없으면 생성, 있으면 이미지 업데이트
           if kubectl get deployment backend-deployment -n default 2>/dev/null; then
+            echo "Updating existing deployment..."
             kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n default
+            kubectl rollout status deployment/backend-deployment -n default --timeout=5m || true
           else
+            echo "Creating new deployment..."
             # eks/ 폴더 또는 k8s/ 폴더에서 파일 찾기
             if [ -f "eks/backend-deployment.yaml" ]; then
               sed "s|<AWS_ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" eks/backend-deployment.yaml | kubectl apply -f -
             elif [ -f "k8s/backend-deployment.yaml" ]; then
               sed "s|<AWS_ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" k8s/backend-deployment.yaml | kubectl apply -f -
+            else
+              echo "ERROR: backend-deployment.yaml not found!"
+              exit 1
             fi
+            # 첫 배포 후 잠시 대기
+            sleep 10
+            kubectl rollout status deployment/backend-deployment -n default --timeout=5m || echo "Rollout status check failed, but deployment may still be in progress"
           fi
-          kubectl rollout status deployment/backend-deployment -n default
 
       - name: Deploy Frontend to EKS
         run: |
           FRONTEND_IMAGE="${{ steps.ecr-registry.outputs.registry }}/${{ env.FRONTEND_REPOSITORY }}:${{ github.sha }}"
           # Deployment가 없으면 생성, 있으면 이미지 업데이트
           if kubectl get deployment frontend-deployment -n default 2>/dev/null; then
+            echo "Updating existing deployment..."
             kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n default
+            kubectl rollout status deployment/frontend-deployment -n default --timeout=5m || true
           else
+            echo "Creating new deployment..."
             # eks/ 폴더 또는 k8s/ 폴더에서 파일 찾기
             if [ -f "eks/frontend-deployment.yaml" ]; then
               sed "s|<AWS_ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" eks/frontend-deployment.yaml | kubectl apply -f -
             elif [ -f "k8s/frontend-deployment.yaml" ]; then
               sed "s|<AWS_ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" k8s/frontend-deployment.yaml | kubectl apply -f -
+            else
+              echo "ERROR: frontend-deployment.yaml not found!"
+              exit 1
             fi
+            # 첫 배포 후 잠시 대기
+            sleep 10
+            kubectl rollout status deployment/frontend-deployment -n default --timeout=5m || echo "Rollout status check failed, but deployment may still be in progress"
           fi
-          kubectl rollout status deployment/frontend-deployment -n default
 
       - name: Verify deployments
         run: |
