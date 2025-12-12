@@ -60,8 +60,6 @@ jobs:
           tags: |
             ${{ steps.ecr-registry.outputs.registry }}/${{ env.BACKEND_REPOSITORY }}:latest
             ${{ steps.ecr-registry.outputs.registry }}/${{ env.BACKEND_REPOSITORY }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPOSITORY }}:buildcache
-          cache-to: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPOSITORY }}:buildcache,mode=max
 
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
@@ -79,8 +77,6 @@ jobs:
             VITE_POWER_BI_NTS_MONITORING_URL=${{ secrets.VITE_POWER_BI_NTS_MONITORING_URL || '' }}
             VITE_POWER_BI_POLICE_MISSING_PERSON_URL=${{ secrets.VITE_POWER_BI_POLICE_MISSING_PERSON_URL || '' }}
             VITE_POWER_BI_BEST_DRIVER_URL=${{ secrets.VITE_POWER_BI_BEST_DRIVER_URL || '' }}
-          cache-from: type=registry,ref=${{ steps.ecr-registry.outputs.registry }}/${{ env.FRONTEND_REPOSITORY }}:buildcache
-          cache-to: type=registry,ref=${{ steps.ecr-registry.outputs.registry }}/${{ env.FRONTEND_REPOSITORY }}:buildcache,mode=max
 
   deploy-to-eks:
     name: Deploy to EKS
