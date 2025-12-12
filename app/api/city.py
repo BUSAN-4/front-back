@@ -179,6 +179,52 @@ async def get_arrears_detections(
     } for d in detections]
 
 
+@router.get("/missing-person/detections/today", response_model=List[dict])
+async def get_today_missing_person_detections(
+    current_user: User = Depends(require_busan_admin),
+    db: Session = Depends(get_busan_car_db)
+):
+    """
+    오늘 탐지된 실종자 목록 조회 (부산시청 관리자용)
+    missing_person_detection과 missing_person_info를 조인하여 실종자 정보 포함
+    """
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+    today_end = datetime(now.year, now.month, now.day, 23, 59, 59)
+    
+    # 오늘 탐지된 실종자 조회 (missing_person_detection과 missing_person_info 조인)
+    detections = db.query(
+        MissingPersonDetection,
+        MissingPersonInfo
+    ).outerjoin(
+        MissingPersonInfo, MissingPersonDetection.missing_id == MissingPersonInfo.missing_id
+    ).filter(
+        MissingPersonDetection.detected_time >= today_start,
+        MissingPersonDetection.detected_time <= today_end
+    ).order_by(MissingPersonDetection.detected_time.desc()).all()
+    
+    result = []
+    for detection, info in detections:
+        # 위치 정보 생성
+        location = "위치 정보 없음"
+        if detection.detected_lat and detection.detected_lon:
+            location = f"위도: {detection.detected_lat:.6f}, 경도: {detection.detected_lon:.6f}"
+        
+        result.append({
+            "detectionId": detection.detection_id,
+            "missingId": detection.missing_id or "알 수 없음",
+            "missingName": info.missing_name if info else "알 수 없음",
+            "missingAge": info.missing_age if info else None,
+            "detectedLat": detection.detected_lat,
+            "detectedLon": detection.detected_lon,
+            "detectedTime": detection.detected_time.isoformat() if detection.detected_time else None,
+            "location": location,
+            "detectionSuccess": bool(detection.detection_success) if detection.detection_success is not None else None
+        })
+    
+    return result
+
+
 @router.get("/arrears/detections/today", response_model=List[dict])
 async def get_today_arrears_detections(
     current_user: User = Depends(require_busan_admin),
@@ -252,12 +298,8 @@ async def get_arrears_stats(
     # 총 체납 금액 (arrears_info 테이블의 total_arrears_amount 합계)
     total_amount = busan_car_db.query(func.sum(ArrearsInfo.total_arrears_amount)).scalar() or 0
     
-    # 월별 신규 체납자 추이 (최근 7개월)
-    # arrears_info 테이블의 arrears_period 컬럼에서 시작 월 추출하여 집계
-    # SQL: SELECT SUBSTRING_INDEX(arrears_period, '~', 1) AS start_month, COUNT(*) FROM arrears_info GROUP BY start_month
+    # 월별 추이 (최근 7개월) - 실종자 관리와 동일한 형식
     monthly_trend = []
-    
-    # 최근 7개월 목록 생성
     month_list = []
     for i in range(6, -1, -1):  # 6개월 전부터 현재까지
         target_year = now.year
@@ -271,27 +313,48 @@ async def get_arrears_stats(
             target_month -= 12
             target_year += 1
         
-        month_list.append(f"{target_year}.{target_month:02d}")
+        month_list.append((target_year, target_month))
     
-    # arrears_info 테이블에서 월별 신규 체납자 집계 (arrears_period의 시작 월 기준)
-    query = text("""
-        SELECT 
-            SUBSTRING_INDEX(arrears_period, '~', 1) AS start_month,
-            COUNT(*) AS new_arrears_count
-        FROM arrears_info
-        WHERE arrears_period IS NOT NULL
-        GROUP BY start_month
-        ORDER BY start_month DESC
-    """)
-    
-    result = busan_car_db.execute(query)
-    monthly_data = {row[0]: row[1] for row in result.fetchall()}
-    
-    # 최근 7개월에 대해 데이터 구성 (없는 월은 0으로)
-    for month_str in month_list:
+    for year, month in month_list:
+        month_start = datetime(year, month, 1, 0, 0, 0)
+        if month == 12:
+            month_end = datetime(year + 1, 1, 1, 0, 0, 0)
+        else:
+            month_end = datetime(year, month + 1, 1, 0, 0, 0)
+        
+        # 해당 월의 신규 체납자 수 (arrears_info의 arrears_period 시작 월 기준)
+        month_str = f"{year}.{month:02d}"
+        month_new_arrears = busan_car_db.execute(text("""
+            SELECT COUNT(*) 
+            FROM arrears_info 
+            WHERE SUBSTRING_INDEX(arrears_period, '~', 1) = :month_str
+        """), {"month_str": month_str}).scalar() or 0
+        
+        # 해당 월의 탐지 건수 (arrears_detection의 detected_time 기준, detection_success = 1인 것만)
+        month_detected = busan_car_db.query(func.count(ArrearsDetection.detection_id)).filter(
+            ArrearsDetection.detected_time >= month_start,
+            ArrearsDetection.detected_time < month_end,
+            ArrearsDetection.detection_success == 1
+        ).scalar() or 0
+        
+        # 해당 월의 해결완료 수 (arrears_detection_modifications의 is_resolved = True, resolved_at 기준)
+        month_resolved = web_db.query(func.count(ArrearsDetectionModification.id)).filter(
+            ArrearsDetectionModification.is_resolved == True,
+            ArrearsDetectionModification.resolved_at >= month_start,
+            ArrearsDetectionModification.resolved_at < month_end
+        ).scalar() or 0
+        
+        # 해결률 계산 (해결완료 수 / 신규 체납자 수 * 100)
+        month_resolution_rate = 0
+        if month_new_arrears > 0:
+            month_resolution_rate = round((month_resolved / month_new_arrears) * 100, 1)
+        
         monthly_trend.append({
-            "month": month_str.replace('.', '-'),  # "2025.12" -> "2025-12" 형식으로 변환
-            "count": monthly_data.get(month_str, 0)
+            "month": f"{year}-{month:02d}",
+            "newArrears": month_new_arrears,
+            "detected": month_detected,
+            "resolved": month_resolved,
+            "resolutionRate": month_resolution_rate
         })
     
     # 이번달 해결완료 수 (web DB에서 is_resolved = True인 것)
@@ -324,6 +387,7 @@ async def get_arrears_stats(
         "todayDetected": today_detected,
         "totalAmount": int(total_amount),
         "monthlyTrend": monthly_trend,
+        "monthlyNew": monthly_new,  # 이번달 신규 체납자 수
         "resolvedCount": resolved_count,
         "resolutionRate": resolution_rate
     }
@@ -879,6 +943,18 @@ async def get_top_drowsy_session(
         }
 
 
+def calculate_drowsy_penalty(duration_sec: int) -> int:
+    """
+    졸음운전 감점 계산
+    - 4초당 1점씩 감점
+    - 예: 4초 = 1점, 8초 = 2점, 12초 = 3점, 16초 = 4점
+    """
+    if duration_sec < 4:
+        return 0
+    # 4초 단위로 나눈 몫이 감점 (소수점 버림)
+    return duration_sec // 4
+
+
 @router.get("/safe-driving/best-drivers/monthly", response_model=List[dict])
 async def get_best_drivers_monthly(
     year: int = Query(..., description="연도 (예: 2024)"),
@@ -886,83 +962,210 @@ async def get_best_drivers_monthly(
     db: Session = Depends(get_busan_car_db)
 ):
     """
-    월별 베스트 드라이버 Top 10 조회 (발생률 기반 점수 계산)
+    월별 베스트 드라이버 Top 10 조회 (안전운전 점수 기준)
     
-    점수 계산 방식:
-    - 급가속, 급감속, 눈감음 총합을 세션 수로 나눈 발생률 계산
-    - 발생률이 낮을수록 높은 점수 (1000점 만점)
-    - 발생률 0.0 = 1000점, 발생률 1.0 = 0점
+    점수 계산 방식 (일반 사용자 안전운전 점수 계산 로직과 동일):
+    - 안전운전 점수 = 100 - (급가속/급감속 감점) - (졸음운전 감점)
+    - 급가속/급감속: dt 기준으로 10분 단위 그룹화 후 각 그룹의 합계를 더함
+    - 졸음운전: 4초당 1점 감점 (최대 제한 없음)
+    - 차량별 평균 안전운전 점수로 정렬
     """
-    query = text("""
-        SELECT 
-            ds.car_id,
-            uv.user_car_brand,
-            uv.user_car_model,
-            uv.age,
-            uv.user_sex,
-            uv.user_location,
-            COALESCE(SUM(COALESCE(dsi.app_rapid_acc, 0)), 0) as total_rapid_acc,
-            COALESCE(SUM(COALESCE(dsi.app_rapid_deacc, 0)), 0) as total_rapid_deacc,
-            COALESCE(SUM(COALESCE(dd.gaze_closure, 0)), 0) as total_gaze_closure,
-            COUNT(DISTINCT ds.session_id) as session_count
-        FROM driving_session ds
-        LEFT JOIN uservehicle uv ON ds.car_id = uv.car_id
-        LEFT JOIN driving_session_info dsi ON ds.session_id = dsi.session_id
-        LEFT JOIN drowsy_drive dd ON ds.session_id = dd.session_id
-        WHERE YEAR(dsi.createdDate) = :year
-          AND MONTH(dsi.createdDate) = :month
-          AND dsi.createdDate IS NOT NULL
-        GROUP BY ds.car_id, uv.user_car_brand, uv.user_car_model, uv.age, uv.user_sex, uv.user_location
-        HAVING COUNT(DISTINCT ds.session_id) > 0
-        ORDER BY (
-            (COALESCE(SUM(COALESCE(dsi.app_rapid_acc, 0)), 0) + 
-             COALESCE(SUM(COALESCE(dsi.app_rapid_deacc, 0)), 0) + 
-             COALESCE(SUM(COALESCE(dd.gaze_closure, 0)), 0)) / 
-            NULLIF(COUNT(DISTINCT ds.session_id), 0)
-        ) ASC
-        LIMIT 10
-    """)
+    # 해당 월에 실제 발생한 급가속/급감속 데이터 조회 (dt 기준으로 년도/월 필터링)
+    # JOIN을 사용하여 세션 정보와 함께 조회
+    rapid_infos_query = db.query(
+        BusanCarDrivingSessionInfo,
+        BusanCarDrivingSession.car_id
+    ).join(
+        BusanCarDrivingSession,
+        BusanCarDrivingSessionInfo.session_id == BusanCarDrivingSession.session_id
+    ).filter(
+        BusanCarDrivingSessionInfo.dt.isnot(None),
+        extract('year', BusanCarDrivingSessionInfo.dt) == year,
+        extract('month', BusanCarDrivingSessionInfo.dt) == month,
+        BusanCarDrivingSession.car_id.isnot(None)
+    ).order_by(BusanCarDrivingSessionInfo.dt).all()
     
-    result = db.execute(query, {"year": year, "month": month})
-    rows = result.fetchall()
+    # 결과를 분리
+    rapid_infos = []
+    rapid_info_to_car = {}
+    for info, car_id in rapid_infos_query:
+        rapid_infos.append(info)
+        rapid_info_to_car[info.session_id] = car_id
     
+    # 해당 월에 실제 발생한 졸음운전 데이터 조회 (detected_at 기준으로 년도/월 필터링)
+    # JOIN을 사용하여 세션 정보와 함께 조회
+    drowsy_records_query = db.query(
+        BusanCarDrowsyDrive,
+        BusanCarDrivingSession.car_id
+    ).join(
+        BusanCarDrivingSession,
+        BusanCarDrowsyDrive.session_id == BusanCarDrivingSession.session_id
+    ).filter(
+        BusanCarDrowsyDrive.detected_at.isnot(None),
+        extract('year', BusanCarDrowsyDrive.detected_at) == year,
+        extract('month', BusanCarDrowsyDrive.detected_at) == month,
+        BusanCarDrivingSession.car_id.isnot(None)
+    ).all()
+    
+    # 결과를 분리
+    drowsy_records = []
+    drowsy_to_car = {}
+    for drowsy, car_id in drowsy_records_query:
+        drowsy_records.append(drowsy)
+        drowsy_to_car[drowsy.session_id] = car_id
+    
+    # 세션별로 데이터 집계 (일반 사용자 로직과 동일)
+    session_data = {}  # session_id -> {drowsy_records, rapid_infos, car_id}
+    
+    # 졸음운전 데이터를 세션별로 그룹화
+    for drowsy in drowsy_records:
+        session_id = drowsy.session_id
+        if not session_id:
+            continue
+        car_id = drowsy_to_car.get(session_id)
+        if not car_id:
+            continue  # car_id가 없으면 건너뜀
+        
+        if session_id not in session_data:
+            session_data[session_id] = {
+                'drowsy_records': [],
+                'rapid_infos': [],
+                'car_id': car_id
+            }
+        session_data[session_id]['drowsy_records'].append(drowsy)
+    
+    # 급가속/급감속 데이터를 세션별로 그룹화
+    for info in rapid_infos:
+        session_id = info.session_id
+        if not session_id:
+            continue
+        car_id = rapid_info_to_car.get(session_id)
+        if not car_id:
+            continue  # car_id가 없으면 건너뜀
+        
+        if session_id not in session_data:
+            session_data[session_id] = {
+                'drowsy_records': [],
+                'rapid_infos': [],
+                'car_id': car_id
+            }
+        session_data[session_id]['rapid_infos'].append(info)
+    
+    if not session_data:
+        return []
+    
+    # 차량별 안전운전 점수 계산
+    car_scores = {}  # car_id -> {total_score, session_count}
+    
+    # 세션별로 점수 계산 (일반 사용자 로직과 동일)
+    for session_id, data in session_data.items():
+        car_id = data.get('car_id')
+        if not car_id:
+            continue
+        
+        # 졸음운전 감점 계산 (정수 단위)
+        drowsy_penalty = 0
+        for drowsy in data['drowsy_records']:
+            drowsy_penalty += calculate_drowsy_penalty(drowsy.duration_sec or 0)
+        
+        # 급가속/급감속 데이터 (dt 기준으로 10분 단위 그룹화)
+        session_infos = data['rapid_infos']
+        
+        # 10분 단위로 그룹화하여 급가속/급감속 합계 계산
+        rapid_penalty = 0
+        if session_infos:  # 데이터가 있을 때만 계산
+            current_10min_group = None
+            current_group_acc_sum = 0  # 현재 그룹의 급가속 합계
+            current_group_deacc_sum = 0  # 현재 그룹의 급감속 합계
+            
+            for info in session_infos:
+                if info.dt:
+                    # 10분 단위로 그룹화 (분을 10으로 나눈 몫)
+                    minute_group = info.dt.minute // 10
+                    group_key = (
+                        info.dt.year,
+                        info.dt.month,
+                        info.dt.day,
+                        info.dt.hour,
+                        minute_group
+                    )
+                    
+                    if current_10min_group != group_key:
+                        # 새로운 10분 그룹 시작
+                        if current_10min_group is not None:
+                            # 이전 그룹의 총합(급가속 + 급감속)을 총 감점에 추가
+                            group_total = current_group_acc_sum + current_group_deacc_sum
+                            rapid_penalty += group_total
+                        current_10min_group = group_key
+                        current_group_acc_sum = 0
+                        current_group_deacc_sum = 0
+                    
+                    # 급가속/급감속 합계 계산 (각 10분 그룹 내에서 실제 값의 합계)
+                    current_group_acc_sum += int(info.app_rapid_acc or 0)
+                    current_group_deacc_sum += int(info.app_rapid_deacc or 0)
+            
+            # 마지막 그룹의 총합을 총 감점에 추가
+            if current_10min_group is not None:
+                group_total = current_group_acc_sum + current_group_deacc_sum
+                rapid_penalty += group_total
+        
+        # 안전운전 점수 계산 (100점 만점에서 감점, 정수)
+        total_penalty = int(drowsy_penalty) + int(rapid_penalty)
+        safety_score = int(max(0, 100 - total_penalty))
+        
+        # 차량별로 점수 누적
+        if car_id not in car_scores:
+            car_scores[car_id] = {
+                'total_score': 0,
+                'session_count': 0
+            }
+        
+        car_scores[car_id]['total_score'] += safety_score
+        car_scores[car_id]['session_count'] += 1
+    
+    # 차량별 평균 안전운전 점수 계산
+    car_avg_scores = {}
+    for car_id, score_data in car_scores.items():
+        if score_data['session_count'] > 0:
+            avg_score = score_data['total_score'] / score_data['session_count']
+            car_avg_scores[car_id] = {
+                'avg_score': avg_score,
+                'session_count': score_data['session_count']
+            }
+    
+    # 차량 정보 조회
+    car_ids = list(car_avg_scores.keys())
+    if not car_ids:
+        return []
+    
+    user_vehicles = db.query(BusanCarUserVehicle).filter(
+        BusanCarUserVehicle.car_id.in_(car_ids)
+    ).all()
+    
+    car_info = {uv.car_id: uv for uv in user_vehicles}
+    
+    # 점수 기준으로 정렬 (높은 순)
+    sorted_cars = sorted(
+        car_avg_scores.items(),
+        key=lambda x: x[1]['avg_score'],
+        reverse=True
+    )[:10]
+    
+    # 결과 생성
     best_drivers = []
-    for idx, row in enumerate(rows, 1):
-        total_rapid_acc = row[6] or 0
-        total_rapid_deacc = row[7] or 0
-        total_gaze_closure = row[8] or 0
-        session_count = row[9] or 1  # 0으로 나누기 방지
-        
-        # 총 사고 횟수
-        total_incidents = total_rapid_acc + total_rapid_deacc + total_gaze_closure
-        
-        # 발생률 계산 (세션당 평균 사고 횟수)
-        # 세션 수가 많을수록 더 공정한 평가를 위해 발생률 사용
-        if session_count > 0:
-            incident_rate = total_incidents / session_count
-        else:
-            incident_rate = 0
-        
-        # 점수 계산: 발생률 기반 (낮을수록 좋음)
-        # 발생률 0.0 = 1000점, 발생률 1.0 = 0점
-        # 발생률이 0.1 (세션당 0.1회) = 900점
-        driver_score = max(0, 1000 - (incident_rate * 1000))
+    for idx, (car_id, score_data) in enumerate(sorted_cars, 1):
+        uv = car_info.get(car_id)
         
         best_drivers.append({
             "rank": idx,
-            "carId": row[0],
-            "carBrand": row[1],
-            "carModel": row[2],
-            "driverAge": row[3],
-            "driverSex": row[4],
-            "driverLocation": row[5],
-            "totalRapidAcc": int(total_rapid_acc),
-            "totalRapidDeacc": int(total_rapid_deacc),
-            "totalGazeClosure": int(total_gaze_closure),
-            "totalScore": int(total_incidents),
-            "driverScore": round(driver_score, 2),
-            "sessionCount": session_count,
-            "incidentRate": round(incident_rate, 4)  # 발생률 추가
+            "carId": car_id,
+            "carBrand": uv.user_car_brand if uv else None,
+            "carModel": uv.user_car_model if uv else None,
+            "driverAge": uv.age if uv else None,
+            "driverSex": uv.user_sex if uv else None,
+            "driverLocation": uv.user_location if uv else None,
+            "safetyScore": round(score_data['avg_score'], 2),
+            "sessionCount": score_data['session_count']
         })
     
     return best_drivers

@@ -83,7 +83,7 @@ def init_db():
     # 실제 DB 테이블을 사용하므로 테이블 생성은 하지 않음
     # 모든 모델을 import하여 Base.metadata에 등록
     from app.models import (
-        user, user_vehicle, car_plate_info, driving_session,
+        user, car_plate_info, driving_session,
         driving_session_info, missing_person_detection,
         drowsy_drive, arrears_detection
     )

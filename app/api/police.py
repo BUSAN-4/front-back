@@ -185,17 +185,35 @@ async def update_detection_result(
     busan_car_db.commit()
     busan_car_db.refresh(detection)
     
-    # 수정 기록 저장 (web DB)
-    modification = MissingPersonDetectionModification(
-        detection_id=detection_id,
-        missing_id=detection.missing_id or "알 수 없음",
-        previous_result=previous_result,
-        new_result=request.detection_success,
-        modified_by=current_user.id
-    )
-    web_db.add(modification)
-    web_db.commit()
-    web_db.refresh(modification)
+    # 기존 수정 기록 확인 (같은 missing_id와 detection_id)
+    missing_id = detection.missing_id or "알 수 없음"
+    existing_modification = web_db.query(MissingPersonDetectionModification).filter(
+        MissingPersonDetectionModification.detection_id == detection_id,
+        MissingPersonDetectionModification.missing_id == missing_id
+    ).first()
+    
+    if existing_modification:
+        # 기존 행 업데이트
+        # 탐지 결과 수정 시에는 is_resolved와 resolved_at은 변경하지 않음
+        existing_modification.previous_result = previous_result
+        existing_modification.new_result = request.detection_success
+        existing_modification.modified_by_user_id = current_user.id
+        # is_resolved와 resolved_at은 해결완료 처리할 때만 변경됨
+        # updated_at은 onupdate로 자동 업데이트됨
+        web_db.commit()
+        web_db.refresh(existing_modification)
+    else:
+        # 새 행 생성
+        modification = MissingPersonDetectionModification(
+            detection_id=detection_id,
+            missing_id=missing_id,
+            previous_result=previous_result,
+            new_result=request.detection_success,
+            modified_by_user_id=current_user.id
+        )
+        web_db.add(modification)
+        web_db.commit()
+        web_db.refresh(modification)
     
     return {
         "detectionId": detection.detection_id,
@@ -228,32 +246,48 @@ async def resolve_missing_person(
             detail="탐지 기록을 찾을 수 없습니다"
         )
     
-    # 이미 해결완료 처리되었는지 확인
-    existing_resolution = web_db.query(MissingPersonDetectionModification).filter(
+    missing_id = detection.missing_id or "알 수 없음"
+    
+    # 기존 수정 기록 확인 (같은 missing_id와 detection_id)
+    existing_modification = web_db.query(MissingPersonDetectionModification).filter(
         MissingPersonDetectionModification.detection_id == detection_id,
-        MissingPersonDetectionModification.is_resolved == True
+        MissingPersonDetectionModification.missing_id == missing_id
     ).first()
     
-    if existing_resolution:
+    # 이미 해결완료 처리되었는지 확인
+    if existing_modification and existing_modification.is_resolved:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이미 해결완료 처리된 탐지입니다"
         )
     
-    # 해결완료 기록 저장 (web DB)
+    # 해결완료 기록 저장/업데이트 (web DB)
+    # 해결완료는 탐지 결과와 별개이므로 new_result는 변경하지 않음
     from datetime import datetime
-    resolution = MissingPersonDetectionModification(
-        detection_id=detection_id,
-        missing_id=detection.missing_id or "알 수 없음",
-        previous_result=bool(detection.detection_success) if detection.detection_success is not None else None,
-        new_result=True,  # 해결완료는 탐지 성공으로 간주
-        modified_by=current_user.id,
-        is_resolved=True,
-        resolved_at=datetime.now()
-    )
-    web_db.add(resolution)
-    web_db.commit()
-    web_db.refresh(resolution)
+    if existing_modification:
+        # 기존 행 업데이트: is_resolved와 resolved_at만 설정
+        # new_result와 previous_result는 그대로 유지 (탐지 결과 수정과 별개)
+        existing_modification.is_resolved = True
+        existing_modification.resolved_at = datetime.now()
+        # updated_at은 onupdate로 자동 업데이트됨
+        web_db.commit()
+        web_db.refresh(existing_modification)
+        resolution = existing_modification
+    else:
+        # 새 행 생성: 현재 탐지 결과를 그대로 유지
+        current_result = bool(detection.detection_success) if detection.detection_success is not None else None
+        resolution = MissingPersonDetectionModification(
+            detection_id=detection_id,
+            missing_id=missing_id,
+            previous_result=None,  # 해결완료만 처리하는 경우 previous_result는 없음
+            new_result=current_result,  # 현재 탐지 결과 유지
+            modified_by_user_id=current_user.id,
+            is_resolved=True,
+            resolved_at=datetime.now()
+        )
+        web_db.add(resolution)
+        web_db.commit()
+        web_db.refresh(resolution)
     
     return {
         "detectionId": detection.detection_id,

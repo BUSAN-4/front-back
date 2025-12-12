@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
 from app.database import get_web_db
 from app.models.user import User, UserRole
 from app.models.user_log import LogStatus
@@ -7,8 +9,14 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserResponse
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.utils.logging import log_user_action, get_client_ip
+from app.api.deps import get_current_user
 
 router = APIRouter()
+
+
+class LogActionRequest(BaseModel):
+    action: str
+    details: Optional[str] = None
 
 
 def get_role_from_organization(user_type: str, organization: str = None) -> UserRole:
@@ -52,7 +60,6 @@ async def register(
         email=request.email,    # email만 고유해야 함
         hashed_password=hashed_password,
         name=request.name,
-        phone=request.phone,
         role=role,
         organization=request.organization
     )
@@ -108,6 +115,26 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # OAuth 사용자인 경우 일반 로그인 불가
+    if user.oauth_provider:
+        log_user_action(
+            db=db,
+            action="로그인",
+            status=LogStatus.ERROR,
+            user=user,
+            ip_address=ip_address,
+            details=f"OAuth 사용자 ({user.oauth_provider})는 일반 로그인 불가"
+        )
+        provider_name = {
+            'google': 'Google',
+            'naver': 'Naver',
+            'kakao': 'Kakao'
+        }.get(user.oauth_provider, user.oauth_provider)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"이 계정은 {provider_name} OAuth로 로그인해야 합니다. OAuth 버튼을 사용해주세요."
         )
     
     # 비밀번호 검증
@@ -194,3 +221,24 @@ async def login(
         "user": user_response.dict()
     }
 
+
+@router.post("/log-action")
+async def log_action(
+    request: LogActionRequest,
+    http_request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_web_db)
+):
+    """클라이언트에서 사용자 액션 로그 기록"""
+    ip_address = get_client_ip(http_request)
+    
+    log_user_action(
+        db=db,
+        action=request.action,
+        status=LogStatus.SUCCESS,
+        user=current_user,
+        ip_address=ip_address,
+        details=request.details
+    )
+    
+    return {"message": "Log recorded successfully"}

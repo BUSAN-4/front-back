@@ -41,16 +41,17 @@ async def get_all_users(
         user_dict['updated_at'] = user.updated_at.isoformat() if user.updated_at else None
         result.append(user_dict)
     
-    # 로그 기록
-    action = f"사용자 목록 조회" + (f" (검색: {search})" if search else "")
-    log_user_action(
-        db=db,
-        action=action,
-        status=LogStatus.SUCCESS,
-        user=current_user,
-        ip_address=get_client_ip(request),
-        details=f"조회된 사용자 수: {len(result)}"
-    )
+    # 로그 기록: 검색어가 있을 때만 기록 (일반 조회는 로그 기록 안 함)
+    if search:
+        action = f"사용자 목록 조회 (검색: {search})"
+        log_user_action(
+            db=db,
+            action=action,
+            status=LogStatus.SUCCESS,
+            user=current_user,
+            ip_address=get_client_ip(request),
+            details=f"조회된 사용자 수: {len(result)}"
+        )
     
     return result
 
@@ -153,6 +154,20 @@ async def delete_user(
     deleted_user_email = user.email
     deleted_user_name = user.name
     
+    # 관련 레코드 삭제 (외래키 제약조건 때문에 먼저 삭제 필요)
+    from app.models.vehicle import Vehicle
+    from app.models.user_vehicle_mapping import UserVehicleMapping
+    
+    # 사용자의 차량 삭제
+    db.query(Vehicle).filter(Vehicle.user_id == user_id).delete(synchronize_session=False)
+    
+    # 사용자의 차량 매핑 삭제
+    db.query(UserVehicleMapping).filter(UserVehicleMapping.user_id == user_id).delete(synchronize_session=False)
+    
+    # user_logs는 ON DELETE CASCADE로 설정되어 있으므로 자동 삭제됨
+    # 하지만 명시적으로 삭제해도 됨 (선택사항)
+    
+    # 사용자 삭제
     db.delete(user)
     db.commit()
     

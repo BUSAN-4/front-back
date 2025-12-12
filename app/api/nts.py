@@ -129,17 +129,35 @@ async def update_detection_result(
     busan_car_db.commit()
     busan_car_db.refresh(detection)
     
-    # 수정 기록 저장 (web DB)
-    modification = ArrearsDetectionModification(
-        detection_id=detection_id,
-        car_plate_number=detection.car_plate_number or "알 수 없음",
-        previous_result=previous_result,
-        new_result=request.detection_success,
-        modified_by=current_user.id
-    )
-    web_db.add(modification)
-    web_db.commit()
-    web_db.refresh(modification)
+    # 기존 수정 기록 확인 (같은 car_plate_number와 detection_id)
+    car_plate_number = detection.car_plate_number or "알 수 없음"
+    existing_modification = web_db.query(ArrearsDetectionModification).filter(
+        ArrearsDetectionModification.detection_id == detection_id,
+        ArrearsDetectionModification.car_plate_number == car_plate_number
+    ).first()
+    
+    if existing_modification:
+        # 기존 행 업데이트
+        # 탐지 결과 수정 시에는 is_resolved와 resolved_at은 변경하지 않음
+        existing_modification.previous_result = previous_result
+        existing_modification.new_result = request.detection_success
+        existing_modification.modified_by_user_id = current_user.id
+        # is_resolved와 resolved_at은 해결완료 처리할 때만 변경됨
+        # updated_at은 onupdate로 자동 업데이트됨
+        web_db.commit()
+        web_db.refresh(existing_modification)
+    else:
+        # 새 행 생성
+        modification = ArrearsDetectionModification(
+            detection_id=detection_id,
+            car_plate_number=car_plate_number,
+            previous_result=previous_result,
+            new_result=request.detection_success,
+            modified_by_user_id=current_user.id
+        )
+        web_db.add(modification)
+        web_db.commit()
+        web_db.refresh(modification)
     
     return {
         "detectionId": detection.detection_id,
@@ -172,32 +190,48 @@ async def resolve_arrears(
             detail="탐지 기록을 찾을 수 없습니다"
         )
     
-    # 이미 해결완료 처리되었는지 확인
-    existing_resolution = web_db.query(ArrearsDetectionModification).filter(
+    car_plate_number = detection.car_plate_number or "알 수 없음"
+    
+    # 기존 수정 기록 확인 (같은 car_plate_number와 detection_id)
+    existing_modification = web_db.query(ArrearsDetectionModification).filter(
         ArrearsDetectionModification.detection_id == detection_id,
-        ArrearsDetectionModification.is_resolved == True
+        ArrearsDetectionModification.car_plate_number == car_plate_number
     ).first()
     
-    if existing_resolution:
+    # 이미 해결완료 처리되었는지 확인
+    if existing_modification and existing_modification.is_resolved:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이미 해결완료 처리된 탐지입니다"
         )
     
-    # 해결완료 기록 저장 (web DB)
+    # 해결완료 기록 저장/업데이트 (web DB)
+    # 해결완료는 탐지 결과와 별개이므로 new_result는 변경하지 않음
     from datetime import datetime
-    resolution = ArrearsDetectionModification(
-        detection_id=detection_id,
-        car_plate_number=detection.car_plate_number or "알 수 없음",
-        previous_result=bool(detection.detection_success) if detection.detection_success is not None else None,
-        new_result=True,  # 해결완료는 탐지 성공으로 간주
-        modified_by=current_user.id,
-        is_resolved=True,
-        resolved_at=datetime.now()
-    )
-    web_db.add(resolution)
-    web_db.commit()
-    web_db.refresh(resolution)
+    if existing_modification:
+        # 기존 행 업데이트: is_resolved와 resolved_at만 설정
+        # new_result와 previous_result는 그대로 유지 (탐지 결과 수정과 별개)
+        existing_modification.is_resolved = True
+        existing_modification.resolved_at = datetime.now()
+        # updated_at은 onupdate로 자동 업데이트됨
+        web_db.commit()
+        web_db.refresh(existing_modification)
+        resolution = existing_modification
+    else:
+        # 새 행 생성: 현재 탐지 결과를 그대로 유지
+        current_result = bool(detection.detection_success) if detection.detection_success is not None else None
+        resolution = ArrearsDetectionModification(
+            detection_id=detection_id,
+            car_plate_number=car_plate_number,
+            previous_result=None,  # 해결완료만 처리하는 경우 previous_result는 없음
+            new_result=current_result,  # 현재 탐지 결과 유지
+            modified_by_user_id=current_user.id,
+            is_resolved=True,
+            resolved_at=datetime.now()
+        )
+        web_db.add(resolution)
+        web_db.commit()
+        web_db.refresh(resolution)
     
     return {
         "detectionId": detection.detection_id,
@@ -264,12 +298,17 @@ async def get_arrears_stats(
         ArrearsDetection.detection_success == 1
     ).scalar() or 0
     
-    # 탐지 실패 건수 = 전체 체납자 - 탐지 성공
-    failure_count = total_arrears - success_count
+    # 미탐지 건수 = 전체 체납자 - 탐지 성공
+    undetected_count = total_arrears - success_count
     
     # 미확인 건수 (arrears_detection에서 detection_success = NULL)
     unconfirmed_count = busan_car_db.query(func.count(ArrearsDetection.detection_id)).filter(
         ArrearsDetection.detection_success.is_(None)
+    ).scalar() or 0
+    
+    # 오탐지로 수정한 횟수 (new_result = 0인 것의 개수)
+    false_positive_count = web_db.query(func.count(ArrearsDetectionModification.id)).filter(
+        ArrearsDetectionModification.new_result == False
     ).scalar() or 0
     
     # 해결완료 건수 (web DB에서 is_resolved = True인 것)
@@ -289,7 +328,8 @@ async def get_arrears_stats(
     return {
         "totalArrears": total_arrears,
         "detectionSuccess": success_count,
-        "detectionFailure": failure_count,
+        "undetected": undetected_count,  # 미탐지 (전체 체납자 - 탐지 성공)
+        "falsePositiveCount": false_positive_count,  # 오탐지로 수정한 횟수
         "unconfirmed": unconfirmed_count,
         "resolvedCount": resolved_count
     }

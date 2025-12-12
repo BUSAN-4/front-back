@@ -23,8 +23,6 @@ class Vehicle(Base):
     license_plate = Column(String(20), unique=True, nullable=False, index=True)
     car_id = Column(String(255), nullable=True, index=True)  # busan_car DB의 uservehicle.car_id
     vehicle_type = Column(Enum(VehicleType), nullable=False)
-    model = Column(String(50))
-    year = Column(Integer)
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, onupdate=func.current_timestamp())
     

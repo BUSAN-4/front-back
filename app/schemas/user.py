@@ -7,7 +7,6 @@ from app.models.user import UserRole
 class UserBase(BaseModel):
     email: EmailStr
     name: str
-    phone: Optional[str] = None
     role: UserRole = UserRole.GENERAL
     organization: Optional[str] = None
 
@@ -18,15 +17,15 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
-    phone: Optional[str] = None
     email: Optional[EmailStr] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
 
 
 class UserResponse(BaseModel):
     id: str  # frontend는 string으로 사용
     email: str
     name: Optional[str] = None
-    phone: Optional[str] = None
     role: str  # frontend는 string으로 사용
     organization: Optional[str] = None
     createdAt: str  # ISO format string
@@ -41,7 +40,6 @@ class UserResponse(BaseModel):
             id=str(user.id),
             email=user.email,
             name=user.name,
-            phone=user.phone,
             role=user.role.value,
             organization=user.organization,
             createdAt=user.created_at.isoformat() if user.created_at else ""

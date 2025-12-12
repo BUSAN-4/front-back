@@ -1,9 +1,11 @@
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
-from app.api import auth, users, vehicles, trips, city, admin, test, user_safety, nts, police  # test 추가
+from app.api import auth, users, vehicles, city, admin, user_safety, nts, police, oauth
 from app.database import busan_car_engine, BusanCarSessionLocal
+from app.core.config import settings
 
 app = FastAPI(
     title="FastAPI Backend",
@@ -11,15 +13,24 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS 설정 - 모든 응답에 CORS 헤더 추가
+# CORS 설정 - 환경 변수에서 허용된 origin 목록 가져오기
+cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+# 세션 미들웨어를 먼저 추가 (미들웨어는 역순으로 실행되므로 나중에 추가한 것이 먼저 실행됨)
+# 따라서 세션 미들웨어를 나중에 추가하여 먼저 실행되도록 함
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SECRET_KEY,
+    max_age=3600,  # 1시간
+    same_site="lax",
+    https_only=False,  # 개발 환경에서는 False
+    session_cookie="session"  # 쿠키 이름 명시
+)
+
+# CORS 미들웨어 추가
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -43,12 +54,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     
     # CORS 헤더 추가
     origin = request.headers.get("origin")
-    if origin and origin in [
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]:
+    if origin and origin in cors_origins:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     
@@ -58,13 +64,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
-app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
 app.include_router(city.router, prefix="/api/city", tags=["city"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(test.router, prefix="/api/test", tags=["test"])  # 추가
 app.include_router(user_safety.router, prefix="/api/user", tags=["user-safety"])
 app.include_router(nts.router, prefix="/api/nts", tags=["nts"])
 app.include_router(police.router, prefix="/api/police", tags=["police"])
+app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
 
 
 @app.get("/")

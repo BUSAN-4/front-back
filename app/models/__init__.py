@@ -7,7 +7,6 @@ from app.models.arrears_detection_modification import ArrearsDetectionModificati
 from app.models.missing_person_detection_modification import MissingPersonDetectionModification
 
 # busan_car DB 모델들 (읽기 전용)
-from app.models.user_vehicle import UserVehicle
 from app.models.car_plate_info import CarPlateInfo
 from app.models.driving_session import DrivingSession
 from app.models.driving_session_info import DrivingSessionInfo
@@ -27,7 +26,6 @@ __all__ = [
     "LogStatus",
     "ArrearsDetectionModification",
     "MissingPersonDetectionModification",
-    "UserVehicle",
     "CarPlateInfo",
     "DrivingSession",
     "DrivingSessionInfo",

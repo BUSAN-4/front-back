@@ -19,8 +19,6 @@ router = APIRouter()
 class VehicleRegisterRequest(BaseModel):
     license_plate: str  # 번호판 (예: 12가3456)
     vehicle_type: str = "PRIVATE"  # PRIVATE, TAXI, RENTAL
-    model: Optional[str] = None
-    year: Optional[int] = None
 
 
 class VehicleRegisterResponse(BaseModel):
@@ -69,25 +67,30 @@ async def register_vehicle(
     from app.models.busan_car_models import BusanCarUserVehicle, BusanCarDrivingSession
     import random
     
-    # uservehicle 테이블에서 주행 세션이 있는 car_id 목록 조회
-    vehicles_with_sessions = busan_car_db.query(
-        BusanCarUserVehicle.car_id
-    ).join(
-        BusanCarDrivingSession,
-        BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
-    ).distinct().all()
-    
     car_id = None
-    if vehicles_with_sessions:
-        # 주행 데이터가 있는 car_id 중에서 임의로 선택
-        selected = random.choice(vehicles_with_sessions)
-        car_id = selected.car_id
+    
+    # 특정 이메일(0@naver.com)로 로그인한 사용자는 특정 car_id로 고정 매칭
+    if current_user.email == "0@naver.com":
+        car_id = "1224749808"
     else:
-        # 주행 데이터가 없으면 uservehicle 테이블에서 임의의 car_id 선택
-        all_vehicles = busan_car_db.query(BusanCarUserVehicle.car_id).all()
-        if all_vehicles:
-            selected = random.choice(all_vehicles)
+        # uservehicle 테이블에서 주행 세션이 있는 car_id 목록 조회
+        vehicles_with_sessions = busan_car_db.query(
+            BusanCarUserVehicle.car_id
+        ).join(
+            BusanCarDrivingSession,
+            BusanCarUserVehicle.car_id == BusanCarDrivingSession.car_id
+        ).distinct().all()
+        
+        if vehicles_with_sessions:
+            # 주행 데이터가 있는 car_id 중에서 임의로 선택
+            selected = random.choice(vehicles_with_sessions)
             car_id = selected.car_id
+        else:
+            # 주행 데이터가 없으면 uservehicle 테이블에서 임의의 car_id 선택
+            all_vehicles = busan_car_db.query(BusanCarUserVehicle.car_id).all()
+            if all_vehicles:
+                selected = random.choice(all_vehicles)
+                car_id = selected.car_id
     
     if not car_id:
         raise HTTPException(
@@ -111,9 +114,7 @@ async def register_vehicle(
         user_id=current_user.id,
         license_plate=license_plate,
         car_id=car_id,  # busan_car DB의 car_id와 매핑
-        vehicle_type=vehicle_type,
-        model=request.model,
-        year=request.year
+        vehicle_type=vehicle_type
     )
     web_db.add(new_vehicle)
     
@@ -163,8 +164,7 @@ async def get_vehicles(
             "id": vehicle.id,
             "licensePlate": vehicle.license_plate,
             "vehicleType": vehicle.vehicle_type.value,
-            "model": vehicle.model,
-            "year": vehicle.year,
+            "carId": vehicle.car_id,  # car_id 추가
             "createdAt": vehicle.created_at.isoformat() if vehicle.created_at else None
         })
     
@@ -225,6 +225,16 @@ async def delete_vehicle(
             detail="등록된 차량을 찾을 수 없습니다."
         )
     
+    # user_vehicle_mapping 테이블에서도 삭제
+    license_plate = vehicle.license_plate
+    mapping = web_db.query(UserVehicleMapping).filter(
+        UserVehicleMapping.car_plate_number == license_plate
+    ).first()
+    
+    if mapping:
+        web_db.delete(mapping)
+    
+    # vehicles 테이블에서 삭제
     web_db.delete(vehicle)
     web_db.commit()
     

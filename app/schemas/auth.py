@@ -13,7 +13,6 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     name: str
-    phone: Optional[str] = None
     role: str = "user"  # 'user' | 'admin'
     organization: Optional[str] = None  # 'busan' | 'nts' | 'police' | 'system'
 
