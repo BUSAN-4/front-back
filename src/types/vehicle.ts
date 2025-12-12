@@ -5,22 +5,8 @@ export interface Vehicle {
   userId: string;
   licensePlate: string;
   vehicleType: VehicleType;
-  model?: string;
-  year?: number;
+  carId?: string;
   createdAt: string;
-}
-
-export interface TripRecord {
-  id: string;
-  vehicleId: string;
-  startTime: string;
-  endTime: string;
-  distance: number;
-  duration: number;
-  safetyScore: number;
-  drowsinessCount: number;
-  suddenAccelerationCount: number;
-  location?: string;
 }
 
 export interface SafetyScore {

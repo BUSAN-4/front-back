@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (email: string, password: string, role: string, organization?: string) => Promise<User>;
   signup: (data: SignupData) => Promise<User>;
   logout: () => void;
+  setUser: (user: User | null) => void;
 }
 
 interface SignupData {
@@ -97,7 +98,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: data.name,
         email: data.email,
         password: data.password,
-        phone: '', // 필요시 추가
         role: data.role,
         organization: data.organization,
       };
@@ -137,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Input } from '../../../components/ui/input';
 import { Button } from '../../../components/ui/button';
 import { Badge } from '../../../components/ui/badge';
-import { Search, Edit, Trash2, Plus, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { getAllUsers, deleteUser, type UserInfo } from '../../../utils/api';
 
@@ -126,10 +126,6 @@ export default function SystemUserManagementPage() {
                   className="pl-10 w-64"
                 />
               </div>
-              <Button variant="outline" disabled>
-                <Plus className="size-4 mr-2" />
-                사용자 추가
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -168,10 +164,6 @@ export default function SystemUserManagementPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" disabled>
-                      <Edit className="size-4 mr-1" />
-                      수정
-                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

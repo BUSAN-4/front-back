@@ -163,14 +163,10 @@ export default function CityDashboardDelinquent() {
             ) : (
               <>
                 <div className="text-2xl font-bold text-gray-900">
-                  {stats?.monthlyTrend && stats.monthlyTrend.length > 0
-                    ? stats.monthlyTrend[stats.monthlyTrend.length - 1].count
-                    : 0}명
+                  {stats?.monthlyNew || 0}명
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {stats?.monthlyTrend && stats.monthlyTrend.length > 0
-                    ? `${stats.monthlyTrend[stats.monthlyTrend.length - 1].month} 누적`
-                    : '데이터 없음'}
+                  {new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' })} 신규
                 </p>
               </>
             )}
@@ -237,7 +233,7 @@ export default function CityDashboardDelinquent() {
       </div>
 
       {/* 탭 네비게이션 */}
-      <Tabs defaultValue="monthly-new" className="space-y-6">
+      <Tabs defaultValue="monthly-detection" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="monthly-detection">
             <TrendingUp className="size-4 mr-2" />
@@ -245,7 +241,7 @@ export default function CityDashboardDelinquent() {
           </TabsTrigger>
           <TabsTrigger value="monthly-new">
             <TrendingUp className="size-4 mr-2" />
-            월별 신규 체납자 추이
+            월별 추이
           </TabsTrigger>
           <TabsTrigger value="today">
             <Calendar className="size-4 mr-2" />
@@ -253,13 +249,13 @@ export default function CityDashboardDelinquent() {
           </TabsTrigger>
         </TabsList>
 
-        {/* 월별 신규 체납자 추이 탭 */}
+        {/* 월별 추이 탭 */}
         <TabsContent value="monthly-new" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Calendar className="size-5" />
-                월별 신규 체납자 추이
+                월별 체납자 추이
               </CardTitle>
               <CardDescription>최근 7개월 통계</CardDescription>
             </CardHeader>
@@ -281,35 +277,49 @@ export default function CityDashboardDelinquent() {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {stats?.monthlyTrend && stats.monthlyTrend.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      월별 추이 데이터가 없습니다.
-                    </div>
-                  ) : (
-                    (() => {
-                      const maxCount = stats?.monthlyTrend
-                        ? Math.max(...stats.monthlyTrend.map((item) => item.count), 1)
-                        : 1;
-                      return stats?.monthlyTrend.map((item) => (
-                        <div key={item.month} className="flex items-center gap-4">
-                          <div className="w-24 text-sm text-gray-700 font-medium">{item.month}</div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 bg-gray-200 rounded-full h-8 overflow-hidden">
-                                <div
-                                  className="h-full bg-orange-500 flex items-center px-3 text-white text-sm font-medium"
-                                  style={{ width: `${(item.count / maxCount) * 100}%` }}
-                                >
-                                  {item.count}명
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ));
-                    })()
-                  )}
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 text-gray-700 font-medium">월</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">신규 체납자</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">탐지 건수</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">해결완료</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">해결률</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stats?.monthlyTrend && stats.monthlyTrend.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-gray-500">
+                            월별 추이 데이터가 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        stats?.monthlyTrend.map((item) => (
+                          <tr key={item.month} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="py-3 px-4 text-gray-900 font-medium">{item.month}</td>
+                            <td className="py-3 px-4 text-center text-orange-600 font-medium">{item.newArrears}명</td>
+                            <td className="py-3 px-4 text-center text-green-600 font-medium">{item.detected}건</td>
+                            <td className="py-3 px-4 text-center text-blue-600 font-medium">{item.resolved}건</td>
+                            <td className="py-3 px-4 text-center">
+                              <Badge
+                                className={
+                                  item.resolutionRate >= 80
+                                    ? 'bg-green-500 text-white'
+                                    : item.resolutionRate >= 70
+                                    ? 'bg-yellow-500 text-white'
+                                    : 'bg-red-500 text-white'
+                                }
+                              >
+                                {item.resolutionRate}%
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </CardContent>
@@ -326,7 +336,7 @@ export default function CityDashboardDelinquent() {
             <CardContent className="p-0">
               {DELINQUENT_REPORT_URL ? (
                 <div className="w-full">
-                  <PowerBIEmbedView reportUrl={DELINQUENT_REPORT_URL} height="1000px" />
+                  <PowerBIEmbedView reportUrl={DELINQUENT_REPORT_URL} height="800px" />
                 </div>
               ) : (
                 <div className="bg-gray-100 rounded-lg p-8 text-center m-6">

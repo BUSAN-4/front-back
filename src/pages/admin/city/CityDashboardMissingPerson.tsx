@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
-import { UserX, Users, TrendingDown, Calendar, Loader2 } from 'lucide-react';
+import { UserX, Users, TrendingDown, Calendar, Loader2, MapPin, Clock } from 'lucide-react';
 import PowerBIEmbedView from '../../../components/common/powerbi/PowerBIEmbedView';
-import { getCityMissingPersonStats, type CityMissingPersonStats } from '../../../utils/api';
+import { getCityMissingPersonStats, getTodayMissingPersonDetections, type CityMissingPersonStats, type TodayMissingPersonDetection } from '../../../utils/api';
 
 const MISSING_PERSON_REPORT_URL = import.meta.env.VITE_POWER_BI_MISSING_PERSON_URL || "";
 
@@ -12,35 +12,40 @@ export default function CityDashboardMissingPerson() {
   const [stats, setStats] = useState<CityMissingPersonStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [todayDetections, setTodayDetections] = useState<TodayMissingPersonDetection[]>([]);
+  const [loadingDetections, setLoadingDetections] = useState(false);
 
   useEffect(() => {
     fetchStats();
+    fetchTodayDetections();
   }, []);
 
   // 주기적 자동 새로고침 (30초마다) - 경찰청에서 수정한 내용 반영
   useEffect(() => {
     const interval = setInterval(() => {
-      if (document.hasFocus() && !loading) {
+      if (document.hasFocus() && !loading && !loadingDetections) {
         fetchStats(true);
+        fetchTodayDetections(true);
       }
     }, 30000); // 30초마다
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [loading, loadingDetections]);
 
   // 페이지 포커스 시 자동 새로고침
   useEffect(() => {
     const handleFocus = () => {
-      if (!loading) {
+      if (!loading && !loadingDetections) {
         fetchStats(true);
+        fetchTodayDetections(true);
       }
     };
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [loading, loadingDetections]);
 
   const fetchStats = async (silent: boolean = false) => {
     try {
@@ -60,6 +65,47 @@ export default function CityDashboardMissingPerson() {
         setLoading(false);
       }
     }
+  };
+
+  const fetchTodayDetections = async (silent: boolean = false) => {
+    try {
+      if (!silent) {
+        setLoadingDetections(true);
+      }
+      const data = await getTodayMissingPersonDetections();
+      setTodayDetections(data);
+    } catch (err) {
+      console.error('오늘 탐지된 실종자 조회 실패:', err);
+      if (!silent) {
+        setError(err instanceof Error ? err.message : '오늘 탐지된 실종자를 불러오는데 실패했습니다.');
+      }
+    } finally {
+      if (!silent) {
+        setLoadingDetections(false);
+      }
+    }
+  };
+
+  const formatDateTime = (dateString: string | null) => {
+    if (!dateString) return '시간 정보 없음';
+    return new Date(dateString).toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+
+  const getDetectionStatusBadge = (success: boolean | null) => {
+    if (success === null) {
+      return <Badge variant="secondary">미확인</Badge>;
+    }
+    if (success) {
+      return <Badge className="bg-green-500 text-white">탐지 성공</Badge>;
+    }
+    return <Badge variant="destructive">오탐지</Badge>;
   };
 
   return (
@@ -154,7 +200,7 @@ export default function CityDashboardMissingPerson() {
 
       {/* 탭 네비게이션 */}
       <Tabs defaultValue="trend" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="powerbi">
             <Calendar className="size-4 mr-2" />
             월별 부산 실종자 발생 추이
@@ -162,6 +208,10 @@ export default function CityDashboardMissingPerson() {
           <TabsTrigger value="trend">
             <Calendar className="size-4 mr-2" />
             월별 추이
+          </TabsTrigger>
+          <TabsTrigger value="today">
+            <Calendar className="size-4 mr-2" />
+            오늘 탐지
           </TabsTrigger>
         </TabsList>
 
@@ -175,7 +225,7 @@ export default function CityDashboardMissingPerson() {
             <CardContent className="p-0">
               {MISSING_PERSON_REPORT_URL ? (
                 <div className="w-full">
-                  <PowerBIEmbedView reportUrl={MISSING_PERSON_REPORT_URL} height="1000px" />
+                  <PowerBIEmbedView reportUrl={MISSING_PERSON_REPORT_URL} height="800px" />
                 </div>
               ) : (
                 <div className="bg-gray-100 rounded-lg p-8 text-center m-6">
@@ -255,6 +305,84 @@ export default function CityDashboardMissingPerson() {
                               >
                                 {item.resolutionRate}%
                               </Badge>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 오늘 탐지 탭 */}
+        <TabsContent value="today" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>오늘 탐지된 실종자</CardTitle>
+              <CardDescription>경찰청에서 수정한 탐지 결과가 실시간으로 반영됩니다</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingDetections ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="size-8 animate-spin text-blue-500" />
+                  <span className="ml-3 text-gray-600">데이터를 불러오는 중...</span>
+                </div>
+              ) : error ? (
+                <div className="text-center py-8">
+                  <div className="text-red-600 mb-2 font-medium">오류 발생</div>
+                  <div className="text-sm text-gray-500 mb-4">{error}</div>
+                  <button
+                    onClick={() => fetchTodayDetections()}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 text-gray-700 font-medium">실종자 ID</th>
+                        <th className="text-left py-3 px-4 text-gray-700 font-medium">이름</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">나이</th>
+                        <th className="text-left py-3 px-4 text-gray-700 font-medium">탐지 위치</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">탐지 시간</th>
+                        <th className="text-center py-3 px-4 text-gray-700 font-medium">탐지 결과</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {todayDetections.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-gray-500">
+                            오늘 탐지된 실종자가 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        todayDetections.map((detection) => (
+                          <tr key={detection.detectionId} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="py-3 px-4 text-gray-900 font-medium">{detection.missingId}</td>
+                            <td className="py-3 px-4 text-gray-900 font-medium">{detection.missingName}</td>
+                            <td className="py-3 px-4 text-center text-gray-700">
+                              {detection.missingAge !== null ? `${detection.missingAge}세` : '-'}
+                            </td>
+                            <td className="py-3 px-4 text-gray-700">
+                              <div className="flex items-center gap-2">
+                                <MapPin className="size-4 text-gray-400" />
+                                <span>{detection.location}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center text-gray-700">
+                              <div className="flex items-center justify-center gap-2">
+                                <Clock className="size-4 text-gray-400" />
+                                <span>{formatDateTime(detection.detectedTime)}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {getDetectionStatusBadge(detection.detectionSuccess)}
                             </td>
                           </tr>
                         ))

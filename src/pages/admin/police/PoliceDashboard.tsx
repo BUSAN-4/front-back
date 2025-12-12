@@ -47,8 +47,8 @@ export default function PoliceDashboard() {
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1);
   
-  // 탐지 결과 카테고리 선택 (전체, 탐지 성공, 오탐지, 미확인)
-  const [selectedCategory, setSelectedCategory] = useState<string>('all'); // 'all', 'success', 'failure', 'unconfirmed'
+  // 탐지 결과 카테고리 선택 (전체, 탐지 성공, 오탐지)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all'); // 'all', 'success', 'failure'
 
   useEffect(() => {
     fetchData();
@@ -201,11 +201,17 @@ export default function PoliceDashboard() {
       }
       setError(null);
       
-      // 선택한 년도/월의 시작일과 종료일 계산
-      // 백엔드에서 end_date + 1초로 다음 달 1일 00:00:00 미만으로 변환하므로
-      // 해당 월의 마지막 날 23:59:59로 설정하면 통계와 동일한 범위가 됨
-      const startDate = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0);
-      const endDate = new Date(selectedYear, selectedMonth, 0, 23, 59, 59);
+      // 검색어가 있으면 날짜 필터 제거, 없으면 선택한 년도/월 필터 적용
+      let startDate: Date | undefined = undefined;
+      let endDate: Date | undefined = undefined;
+      
+      if (!searchTerm) {
+        // 선택한 년도/월의 시작일과 종료일 계산
+        // 백엔드에서 end_date + 1초로 다음 달 1일 00:00:00 미만으로 변환하므로
+        // 해당 월의 마지막 날 23:59:59로 설정하면 통계와 동일한 범위가 됨
+        startDate = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0);
+        endDate = new Date(selectedYear, selectedMonth, 0, 23, 59, 59);
+      }
       
       // 카테고리에 따른 탐지 결과 필터링
       let detectionSuccess: string | undefined = undefined;
@@ -213,16 +219,14 @@ export default function PoliceDashboard() {
         detectionSuccess = 'true';
       } else if (selectedCategory === 'failure') {
         detectionSuccess = 'false';
-      } else if (selectedCategory === 'unconfirmed') {
-        detectionSuccess = 'null';
       }
       // 'all'인 경우 detectionSuccess는 undefined로 유지
       
       const response = await getMissingPersonDetections({
         missing_id: searchTerm || undefined,
         detection_success: detectionSuccess,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
+        start_date: startDate?.toISOString(),
+        end_date: endDate?.toISOString(),
         page: currentPage,
         limit: ITEMS_PER_PAGE
       });
@@ -324,6 +328,47 @@ export default function PoliceDashboard() {
       : '시간 정보 없음';
     const missingInfo = `${detection.missingName}${detection.missingAge ? ` (${detection.missingAge}세)` : ''}`;
 
+    // 알림 소리 재생
+    const playNotificationSound = () => {
+      try {
+        // AudioContext를 사용하여 알림 소리 생성 (beep 소리)
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // 알림 소리 설정 (800Hz, 0.3초)
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
+        
+        // 0.1초 후 두 번째 beep
+        setTimeout(() => {
+          const oscillator2 = audioContext.createOscillator();
+          const gainNode2 = audioContext.createGain();
+          oscillator2.connect(gainNode2);
+          gainNode2.connect(audioContext.destination);
+          oscillator2.frequency.value = 800;
+          oscillator2.type = 'sine';
+          gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          oscillator2.start(audioContext.currentTime);
+          oscillator2.stop(audioContext.currentTime + 0.3);
+        }, 100);
+      } catch (error) {
+        console.error('알림 소리 재생 실패:', error);
+      }
+    };
+
+    // 알림 소리 재생
+    playNotificationSound();
+
     // 페이지 내 토스트 알림 (항상 표시)
     addToast({
       type: 'warning',
@@ -373,7 +418,7 @@ export default function PoliceDashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">경찰청 관리 대시보드</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">실종자 관리 대시보드</h1>
         <p className="text-gray-600">실종자 탐지 알림 관리 (준실시간)</p>
       </div>
 
@@ -482,7 +527,7 @@ export default function PoliceDashboard() {
             <CardContent className="p-0">
               {POLICE_MISSING_PERSON_URL ? (
                 <div className="w-full">
-                  <PowerBIEmbedView reportUrl={POLICE_MISSING_PERSON_URL} height="1000px" />
+                  <PowerBIEmbedView reportUrl={POLICE_MISSING_PERSON_URL} height="800px" />
                 </div>
               ) : (
                 <div className="bg-gray-100 rounded-lg p-8 text-center m-6">
@@ -535,11 +580,10 @@ export default function PoliceDashboard() {
               {/* 카테고리 선택 탭 */}
               <div className="mb-6">
                 <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="w-full">
-                  <TabsList className="grid w-full grid-cols-4">
+                  <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="all">전체</TabsTrigger>
                     <TabsTrigger value="success">탐지 성공</TabsTrigger>
                     <TabsTrigger value="failure">오탐지</TabsTrigger>
-                    <TabsTrigger value="unconfirmed">미확인</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>

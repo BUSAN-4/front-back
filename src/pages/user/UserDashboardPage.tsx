@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
-import { Car, AlertTriangle, Gauge, Eye, TrendingUp, Calendar } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Car, AlertTriangle, Gauge, Eye, TrendingUp, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import VehicleRegistrationModal from '../../components/user/VehicleRegistrationModal';
 import { useVehicle } from '../../hooks/useVehicle';
 import { getMonthlySafetyScores, type MonthlySafetyScore } from '../../utils/api';
@@ -16,6 +17,7 @@ export default function UserDashboardPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>('all');
 
   // Mock 데이터 제거됨 - 실제 API 데이터를 사용합니다
   const [safetyScore, setSafetyScore] = useState<number | null>(null);
@@ -27,6 +29,8 @@ export default function UserDashboardPage() {
     totalDistance: 0,
   });
   const [recentDrives, setRecentDrives] = useState<MonthlySafetyScore[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10; // 페이지당 항목 수
 
   useEffect(() => {
     fetchVehicles();
@@ -41,7 +45,7 @@ export default function UserDashboardPage() {
     if (hasVehicle && vehicles.length > 0) {
       fetchDashboardData();
     }
-  }, [hasVehicle, vehicles.length]);
+  }, [hasVehicle, vehicles.length, selectedVehicleId]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -65,11 +69,21 @@ export default function UserDashboardPage() {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
-      const recentScores = allScores.filter((score) => {
+      let recentScores = allScores.filter((score) => {
         if (!score.endTime) return false;
         const scoreDate = new Date(score.endTime);
+        // 현재 날짜보다 미래인 데이터는 제외
+        if (scoreDate > now) return false;
         return scoreDate >= thirtyDaysAgo;
       });
+
+      // 선택한 차량으로 필터링
+      if (selectedVehicleId !== 'all') {
+        const selectedVehicle = vehicles.find(v => v.id.toString() === selectedVehicleId);
+        if (selectedVehicle?.carId) {
+          recentScores = recentScores.filter(score => score.carId === selectedVehicle.carId);
+        }
+      }
 
       // 평균 점수 계산
       if (recentScores.length > 0) {
@@ -95,16 +109,16 @@ export default function UserDashboardPage() {
         totalDistance: 0, // 거리 정보는 세션 상세에서 가져와야 함
       });
 
-      // 최근 5개 세션만 표시
-      setRecentDrives(
-        recentScores
-          .sort((a, b) => {
-            const dateA = a.endTime ? new Date(a.endTime).getTime() : 0;
-            const dateB = b.endTime ? new Date(b.endTime).getTime() : 0;
-            return dateB - dateA;
-          })
-          .slice(0, 5)
-      );
+      // 날짜순으로 정렬 (최신순)
+      const sortedScores = recentScores.sort((a, b) => {
+        const dateA = a.endTime ? new Date(a.endTime).getTime() : 0;
+        const dateB = b.endTime ? new Date(b.endTime).getTime() : 0;
+        return dateB - dateA;
+      });
+      
+      setRecentDrives(sortedScores);
+      // 페이지가 변경되면 첫 페이지로 리셋
+      setCurrentPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : '데이터를 불러오는데 실패했습니다.');
       console.error('Error fetching dashboard data:', err);
@@ -180,17 +194,34 @@ export default function UserDashboardPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">안전 운전 대시보드</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">대시보드</h1>
           <p className="text-gray-600">내 운전 습관을 확인하고 안전 점수를 개선하세요</p>
         </div>
-        <Button 
-          onClick={() => navigate('/user/safety-score')}
-          variant="outline"
-          className="flex items-center gap-2"
-        >
-          상세 보기
-          <TrendingUp className="size-4" />
-        </Button>
+        <div className="flex items-center gap-3">
+          {vehicles.length > 0 && (
+            <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="차량 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 차량</SelectItem>
+                {vehicles.map((vehicle) => (
+                  <SelectItem key={vehicle.id} value={vehicle.id.toString()}>
+                    {vehicle.licensePlate}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button 
+            onClick={() => navigate('/user/safety-score')}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            상세 보기
+            <TrendingUp className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {/* 로딩 상태 */}
@@ -351,57 +382,174 @@ export default function UserDashboardPage() {
                     </td>
                   </tr>
                 ) : (
-                  recentDrives.map((drive) => {
-                    const driveDate = drive.endTime 
-                      ? new Date(drive.endTime).toLocaleDateString('ko-KR', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })
-                      : '날짜 없음';
+                  (() => {
+                    // 페이지네이션 계산
+                    const totalPages = Math.ceil(recentDrives.length / itemsPerPage);
+                    const startIndex = (currentPage - 1) * itemsPerPage;
+                    const endIndex = startIndex + itemsPerPage;
+                    const currentPageDrives = recentDrives.slice(startIndex, endIndex);
                     
-                    return (
-                      <tr 
-                        key={drive.sessionId} 
-                        className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
-                        onClick={() => navigate(`/user/safety-detail/${drive.sessionId}`)}
-                      >
-                        <td className="py-4 px-4 text-gray-900 font-medium">{driveDate}</td>
-                        <td className="py-4 px-4 text-center">
-                          <Badge 
-                            variant={drive.safetyScore >= 85 ? 'default' : 'secondary'}
-                            className={drive.safetyScore >= 90 ? 'bg-green-500' : drive.safetyScore >= 70 ? 'bg-yellow-500' : 'bg-red-500'}
-                          >
-                            {drive.safetyScore}점
-                          </Badge>
-                        </td>
-                        <td className="py-4 px-4 text-center text-gray-700">--</td>
-                        <td className="py-4 px-4 text-center">
-                          {drive.drowsyPenalty > 0 ? (
-                            <span className="text-yellow-600 font-medium">{drive.drowsyPenalty}점 감점</span>
-                          ) : (
-                            <span className="text-green-600">없음</span>
-                          )}
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          {drive.rapidPenalty > 0 ? (
-                            <span className="text-red-600 font-medium">{drive.rapidPenalty}점 감점</span>
-                          ) : (
-                            <span className="text-green-600">없음</span>
-                          )}
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          <Badge variant="outline" className="text-xs">
-                            총 {drive.totalPenalty}점 감점
-                          </Badge>
-                        </td>
-                      </tr>
-                    );
-                  })
+                    return currentPageDrives.map((drive) => {
+                      const driveDate = drive.endTime 
+                        ? new Date(drive.endTime).toLocaleDateString('ko-KR', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })
+                        : '날짜 없음';
+                      
+                      return (
+                        <tr 
+                          key={drive.sessionId} 
+                          className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => navigate(`/user/safety-detail/${drive.sessionId}`)}
+                        >
+                          <td className="py-4 px-4 text-gray-900 font-medium">{driveDate}</td>
+                          <td className="py-4 px-4 text-center">
+                            <Badge 
+                              variant={drive.safetyScore >= 85 ? 'default' : 'secondary'}
+                              className={drive.safetyScore >= 90 ? 'bg-green-500' : drive.safetyScore >= 70 ? 'bg-yellow-500' : 'bg-red-500'}
+                            >
+                              {drive.safetyScore}점
+                            </Badge>
+                          </td>
+                          <td className="py-4 px-4 text-center text-gray-700">--</td>
+                          <td className="py-4 px-4 text-center">
+                            {drive.drowsyPenalty > 0 ? (
+                              <span className="text-yellow-600 font-medium">{drive.drowsyPenalty}점 감점</span>
+                            ) : (
+                              <span className="text-green-600">없음</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-4 text-center">
+                            {drive.rapidPenalty > 0 ? (
+                              <span className="text-red-600 font-medium">{drive.rapidPenalty}점 감점</span>
+                            ) : (
+                              <span className="text-green-600">없음</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-4 text-center">
+                            <Badge variant="outline" className="text-xs">
+                              총 {drive.totalPenalty}점 감점
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()
                 )}
               </tbody>
             </table>
           </div>
+          
+          {/* 페이지네이션 */}
+          {recentDrives.length > 0 && (() => {
+            const totalPages = Math.ceil(recentDrives.length / itemsPerPage);
+            const maxVisiblePages = 5; // 최대 표시할 페이지 번호 수
+            
+            // 표시할 페이지 번호 계산
+            const getPageNumbers = () => {
+              const pages: (number | string)[] = [];
+              
+              if (totalPages <= maxVisiblePages) {
+                // 전체 페이지가 적으면 모두 표시
+                for (let i = 1; i <= totalPages; i++) {
+                  pages.push(i);
+                }
+              } else {
+                // 현재 페이지 기준으로 페이지 번호 표시
+                if (currentPage <= 3) {
+                  // 앞부분
+                  for (let i = 1; i <= 5; i++) {
+                    pages.push(i);
+                  }
+                  pages.push('...');
+                  pages.push(totalPages);
+                } else if (currentPage >= totalPages - 2) {
+                  // 뒷부분
+                  pages.push(1);
+                  pages.push('...');
+                  for (let i = totalPages - 4; i <= totalPages; i++) {
+                    pages.push(i);
+                  }
+                } else {
+                  // 중간
+                  pages.push(1);
+                  pages.push('...');
+                  for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+                    pages.push(i);
+                  }
+                  pages.push('...');
+                  pages.push(totalPages);
+                }
+              }
+              
+              return pages;
+            };
+            
+            const pageNumbers = getPageNumbers();
+            
+            return (
+              <div className="flex flex-col items-center gap-4 mt-6 pt-4 border-t border-gray-200">
+                <div className="text-sm text-gray-600">
+                  전체 {recentDrives.length}개 중 {((currentPage - 1) * itemsPerPage) + 1}-
+                  {Math.min(currentPage * itemsPerPage, recentDrives.length)}개 표시
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="flex items-center gap-1"
+                  >
+                    <ChevronLeft className="size-4" />
+                    이전
+                  </Button>
+                  
+                  <div className="flex items-center gap-1">
+                    {pageNumbers.map((page, index) => {
+                      if (page === '...') {
+                        return (
+                          <span key={`ellipsis-${index}`} className="px-2 text-gray-400">
+                            ...
+                          </span>
+                        );
+                      }
+                      
+                      const pageNum = page as number;
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={currentPage === pageNum ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`min-w-[40px] ${
+                            currentPage === pageNum
+                              ? "bg-blue-600 text-white hover:bg-blue-700"
+                              : "hover:bg-gray-100"
+                          }`}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="flex items-center gap-1"
+                  >
+                    다음
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
         </Card>
       )}

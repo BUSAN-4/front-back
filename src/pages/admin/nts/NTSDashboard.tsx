@@ -32,6 +32,9 @@ export default function NTSDashboard() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [shownDetections, setShownDetections] = useState<Set<string>>(new Set()); // 이미 표시한 탐지 ID 저장
   const { addToast } = useToast();
+  
+  // 탐지 결과 카테고리 선택 (전체, 탐지 성공, 오탐지)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all'); // 'all', 'success', 'failure'
 
   useEffect(() => {
     fetchData();
@@ -51,6 +54,13 @@ export default function NTSDashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
+
+  // 카테고리 변경 시 데이터 새로고침
+  useEffect(() => {
+    setCurrentPage(1);
+    fetchDetections(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory]);
 
   // 주기적 자동 새로고침 (30초마다)
   useEffect(() => {
@@ -136,6 +146,47 @@ export default function NTSDashboard() {
         })
       : '시간 정보 없음';
 
+    // 알림 소리 재생
+    const playNotificationSound = () => {
+      try {
+        // AudioContext를 사용하여 알림 소리 생성 (beep 소리)
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // 알림 소리 설정 (800Hz, 0.3초)
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
+        
+        // 0.1초 후 두 번째 beep
+        setTimeout(() => {
+          const oscillator2 = audioContext.createOscillator();
+          const gainNode2 = audioContext.createGain();
+          oscillator2.connect(gainNode2);
+          gainNode2.connect(audioContext.destination);
+          oscillator2.frequency.value = 800;
+          oscillator2.type = 'sine';
+          gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          oscillator2.start(audioContext.currentTime);
+          oscillator2.stop(audioContext.currentTime + 0.3);
+        }, 100);
+      } catch (error) {
+        console.error('알림 소리 재생 실패:', error);
+      }
+    };
+
+    // 알림 소리 재생
+    playNotificationSound();
+
     // 페이지 내 토스트 알림 (항상 표시)
     addToast({
       type: 'warning',
@@ -179,8 +230,19 @@ export default function NTSDashboard() {
         setLoading(true);
       }
       setError(null);
+      
+      // 카테고리에 따른 탐지 결과 필터링
+      let detectionSuccess: boolean | undefined = undefined;
+      if (selectedCategory === 'success') {
+        detectionSuccess = true;
+      } else if (selectedCategory === 'failure') {
+        detectionSuccess = false;
+      }
+      // 'all'인 경우 detectionSuccess는 undefined로 유지
+      
       const response = await getArrearsDetections({
         car_plate_number: searchTerm || undefined,
+        detection_success: detectionSuccess,
         page: currentPage,
         limit: ITEMS_PER_PAGE
       });
@@ -292,7 +354,7 @@ export default function NTSDashboard() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <Car className="size-4 text-red-500" />
-              전체 탐지 건수
+              전체 체납자 수
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -315,6 +377,11 @@ export default function NTSDashboard() {
               {stats ? stats.detectionSuccess : '-'}건
             </div>
             <p className="text-xs text-gray-500 mt-1">확인된 탐지</p>
+            {stats && (
+              <p className="text-xs text-gray-400 mt-1">
+                미탐지: {stats.undetected}건
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -327,9 +394,9 @@ export default function NTSDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {stats ? stats.detectionFailure : '-'}건
+              {stats ? stats.falsePositiveCount : '-'}건
             </div>
-            <p className="text-xs text-gray-500 mt-1">전체 체납자 - 탐지 성공</p>
+            <p className="text-xs text-gray-500 mt-1">오탐지로 수정한 횟수</p>
           </CardContent>
         </Card>
 
@@ -371,7 +438,7 @@ export default function NTSDashboard() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="w-full">
-                <PowerBIEmbedView reportUrl={NTS_MONITORING_REPORT_URL} height="1000px" />
+                <PowerBIEmbedView reportUrl={NTS_MONITORING_REPORT_URL} height="800px" />
               </div>
             </CardContent>
           </Card>
@@ -428,6 +495,16 @@ export default function NTSDashboard() {
               </div>
             </CardHeader>
             <CardContent>
+              {/* 카테고리 선택 탭 */}
+              <div className="mb-6">
+                <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="all">전체</TabsTrigger>
+                    <TabsTrigger value="success">탐지 성공</TabsTrigger>
+                    <TabsTrigger value="failure">오탐지</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="size-8 animate-spin text-blue-500" />
@@ -513,7 +590,7 @@ export default function NTSDashboard() {
                   
                   {/* 페이지네이션 */}
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                    <div className="flex flex-col items-center gap-4 mt-6 pt-4 border-t">
                       <div className="text-sm text-gray-600">
                         총 {totalCount.toLocaleString()}건 중 {((currentPage - 1) * ITEMS_PER_PAGE + 1).toLocaleString()}-
                         {Math.min(currentPage * ITEMS_PER_PAGE, totalCount).toLocaleString()}건 표시

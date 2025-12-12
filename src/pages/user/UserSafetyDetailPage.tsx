@@ -159,20 +159,25 @@ export default function UserSafetyDetailPage() {
                         key={drowsy.drowsyId}
                         className="p-3 bg-gray-50 rounded-lg border border-gray-200"
                       >
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="text-sm font-medium">
-                            {drowsy.detectedAt
-                              ? new Date(drowsy.detectedAt).toLocaleString('ko-KR')
-                              : '시간 정보 없음'}
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <span>
+                              {drowsy.detectedAt
+                                ? new Date(drowsy.detectedAt).toLocaleString('ko-KR')
+                                : '시간 정보 없음'}
+                            </span>
+                            <span className="text-xs text-gray-500 font-normal">
+                              (지속시간: {drowsy.durationSec}초)
+                            </span>
                           </div>
                           <Badge variant="outline" className="text-red-600">
                             감점 {drowsy.penalty}점
                           </Badge>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
-                          <div>지속시간: {drowsy.durationSec}초</div>
+                        <div className="flex items-center gap-4 text-xs text-gray-600">
                           <div>눈감음: {drowsy.gazeClosure || 0}</div>
                           <div>고개떨림: {drowsy.headDrop || 0}</div>
+                          <div>하품: {drowsy.yawnFlag || 0}</div>
                         </div>
                       </div>
                     ))}

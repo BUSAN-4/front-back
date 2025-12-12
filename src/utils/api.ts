@@ -73,8 +73,18 @@ export async function apiRequest<T>(
         throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
       }
       
+      // 204 No Content는 본문이 없으므로 JSON 파싱 시도하지 않음
+      if (response.status === 204) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+    }
+
+    // 204 No Content 응답은 본문이 없으므로 null 반환
+    if (response.status === 204) {
+      return null as any;
     }
 
     return response.json();
@@ -131,18 +141,6 @@ export interface DemographicsSafeDriving {
   drowsyCount: number;
 }
 
-export interface BestDriver {
-  carId: string;
-  safetyScore: number;
-  sessionCount: number;
-  rapidAccelCount: number;
-  rapidDecelCount: number;
-  drowsyCount: number;
-  totalTravel: number;
-  district: string;
-  rank: number;
-}
-
 export interface HourlySafeDriving {
   hourRange: string;
   safetyRate: number;
@@ -170,13 +168,6 @@ export async function getDemographicsSafeDriving(month?: number): Promise<Demogr
   return apiRequest<DemographicsSafeDriving[]>(`/city/safe-driving/demographics${params}`);
 }
 
-export async function getBestDrivers(month?: number, limit: number = 5): Promise<BestDriver[]> {
-  const params = new URLSearchParams();
-  if (month) params.append('month', month.toString());
-  params.append('limit', limit.toString());
-  return apiRequest<BestDriver[]>(`/city/safe-driving/best-drivers?${params.toString()}`);
-}
-
 export async function getHourlySafeDriving(month?: number): Promise<HourlySafeDriving[]> {
   const params = month ? `?month=${month}` : '';
   return apiRequest<HourlySafeDriving[]>(`/city/safe-driving/hourly${params}`);
@@ -193,52 +184,6 @@ export interface TopDrowsySession {
 export async function getTopDrowsySession(month?: number): Promise<TopDrowsySession> {
   const params = month ? `?month=${month}` : '';
   return apiRequest<TopDrowsySession>(`/city/safe-driving/top-drowsy-session${params}`);
-}
-
-// 베스트 드라이버 API
-export interface BestDriverMonthly {
-  rank: number;
-  carId: string;
-  carBrand: string | null;
-  carModel: string | null;
-  driverAge: number | null;
-  driverSex: string | null;
-  driverLocation: string | null;
-  totalRapidAcc: number;
-  totalRapidDeacc: number;
-  totalGazeClosure: number;
-  totalScore: number;
-  driverScore: number;
-  sessionCount: number;
-  incidentRate?: number;  // 발생률 (세션당 평균 사고 횟수)
-}
-
-export async function getBestDriversMonthly(
-  year: number,
-  month: number
-): Promise<BestDriverMonthly[]> {
-  return apiRequest<BestDriverMonthly[]>(
-    `/trips/best-drivers/monthly?year=${year}&month=${month}`
-  );
-}
-
-export interface BestDriverMonthlyListItem extends BestDriverMonthly {
-  year: number;
-  month: number;
-}
-
-export async function getBestDriversMonthlyList(): Promise<BestDriverMonthlyListItem[]> {
-  return apiRequest<BestDriverMonthlyListItem[]>(`/trips/best-drivers/monthly/list`);
-}
-
-// CITY 관리자 전용 월별 베스트 드라이버 API
-export async function getBestDriversMonthlyForCity(
-  year: number,
-  month: number
-): Promise<BestDriverMonthly[]> {
-  return apiRequest<BestDriverMonthly[]>(
-    `/city/safe-driving/best-drivers/monthly?year=${year}&month=${month}`
-  );
 }
 
 // 인증 API
@@ -282,6 +227,20 @@ export interface CurrentUserResponse {
 
 export async function getCurrentUser(): Promise<CurrentUserResponse> {
   return apiRequest<CurrentUserResponse>('/users/me');
+}
+
+export interface UpdateUserRequest {
+  name?: string;
+  email?: string;
+  current_password?: string;
+  new_password?: string;
+}
+
+export async function updateUser(data: UpdateUserRequest): Promise<CurrentUserResponse> {
+  return apiRequest<CurrentUserResponse>('/users/me', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }
 
 export interface RegisterResponse {
@@ -406,14 +365,11 @@ export async function getSessionSafetyDetail(
   return apiRequest<SessionSafetyDetail>(`/user/safety-score/session/${sessionId}`);
 }
 
-// BestDriverMonthly and BestDriverMonthlyListItem are already exported above
 
 // 차량 등록 API
 export interface RegisterVehicleRequest {
   license_plate: string;
   vehicle_type?: string;
-  model?: string | null;
-  year?: number | null;
 }
 
 export interface RegisterVehicleResponse {
@@ -427,8 +383,7 @@ export interface VehicleInfo {
   id: number;
   licensePlate: string;
   vehicleType: string;
-  model: string | null;
-  year: number | null;
+  carId: string | null;
   createdAt: string | null;
 }
 
@@ -442,17 +397,13 @@ export interface AvailableCarId {
 
 export async function registerVehicleByPlate(
   plateNumber: string,
-  vehicleType: string = 'PRIVATE',
-  model?: string,
-  year?: number
+  vehicleType: string = 'PRIVATE'
 ): Promise<RegisterVehicleResponse> {
   return apiRequest<RegisterVehicleResponse>('/vehicles/register', {
     method: 'POST',
     body: JSON.stringify({ 
       license_plate: plateNumber,
-      vehicle_type: vehicleType,
-      model: model || null,
-      year: year || null
+      vehicle_type: vehicleType
     }),
   });
 }
@@ -551,6 +502,24 @@ export async function updateUserRole(userId: number, role: string): Promise<User
   });
 }
 
+// 사용자 액션 로그 기록
+export interface LogActionRequest {
+  action: string;
+  details?: string;
+}
+
+export async function logUserAction(action: string, details?: string): Promise<void> {
+  try {
+    await apiRequest<{ message: string }>('/auth/log-action', {
+      method: 'POST',
+      body: JSON.stringify({ action, details }),
+    });
+  } catch (error) {
+    // 로그 기록 실패는 조용히 처리 (사용자 경험에 영향 없도록)
+    console.error('Failed to log user action:', error);
+  }
+}
+
 // 국세청 관리자 API
 export interface ArrearsDetection {
   detectionId: string;
@@ -620,7 +589,8 @@ export async function updateDetectionResult(
 export interface ArrearsStats {
   totalArrears: number;
   detectionSuccess: number;
-  detectionFailure: number;
+  undetected: number;  // 미탐지 (전체 체납자 - 탐지 성공)
+  falsePositiveCount: number;  // 오탐지로 수정한 횟수
   unconfirmed: number;
   resolvedCount: number;
 }
@@ -781,8 +751,12 @@ export interface CityArrearsStats {
   totalAmount: number;
   monthlyTrend: Array<{
     month: string;
-    count: number;
+    newArrears: number;
+    detected: number;
+    resolved: number;
+    resolutionRate: number;
   }>;
+  monthlyNew: number;  // 이번달 신규 체납자 수
   resolvedCount: number;
   resolutionRate: number;
 }
@@ -826,4 +800,21 @@ export interface CityMissingPersonStats {
 
 export async function getCityMissingPersonStats(): Promise<CityMissingPersonStats> {
   return apiRequest<CityMissingPersonStats>('/city/missing-person/stats');
+}
+
+// 부산시청 관리자 - 오늘 탐지된 실종자 목록
+export interface TodayMissingPersonDetection {
+  detectionId: string;
+  missingId: string;
+  missingName: string;
+  missingAge: number | null;
+  detectedLat: number | null;
+  detectedLon: number | null;
+  detectedTime: string | null;
+  location: string;
+  detectionSuccess: boolean | null;
+}
+
+export async function getTodayMissingPersonDetections(): Promise<TodayMissingPersonDetection[]> {
+  return apiRequest<TodayMissingPersonDetection[]>('/city/missing-person/detections/today');
 }

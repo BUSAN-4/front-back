@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
 import { Card } from './card';
 

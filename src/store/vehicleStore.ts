@@ -1,17 +1,15 @@
 import { create } from 'zustand';
-import type { Vehicle, TripRecord } from '../types/vehicle';
+import type { Vehicle } from '../types/vehicle';
 
 interface VehicleState {
   vehicles: Vehicle[];
   selectedVehicle: Vehicle | null;
-  tripRecords: TripRecord[];
   isLoading: boolean;
   fetchVehicles: () => Promise<void>;
   registerVehicle: (data: Omit<Vehicle, 'id' | 'userId' | 'createdAt'>) => Promise<void>;
   updateVehicle: (id: string, data: Partial<Vehicle>) => Promise<void>;
   deleteVehicle: (id: string) => Promise<void>;
   selectVehicle: (vehicle: Vehicle | null) => void;
-  fetchTripRecords: (vehicleId: string) => Promise<void>;
 }
 
 // Mock 데이터 제거됨 - 실제 API를 사용합니다
@@ -19,7 +17,6 @@ interface VehicleState {
 export const useVehicleStore = create<VehicleState>((set) => ({
   vehicles: [],
   selectedVehicle: null,
-  tripRecords: [],
   isLoading: false,
 
   fetchVehicles: async () => {
@@ -34,8 +31,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
         userId: '', // 현재 사용자 ID는 API에서 처리
         licensePlate: v.licensePlate,
         vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
-        model: v.model || undefined,
-        year: v.year || undefined,
+        carId: v.carId || undefined,
         createdAt: v.createdAt || new Date().toISOString(),
       }));
       set({ vehicles, isLoading: false });
@@ -50,9 +46,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
     const { registerVehicleByPlate } = await import('../utils/api');
     await registerVehicleByPlate(
       data.licensePlate,
-      data.vehicleType?.toUpperCase() || 'PRIVATE',
-      data.model,
-      data.year
+      data.vehicleType?.toUpperCase() || 'PRIVATE'
     );
     // 등록 후 목록 새로고침
     const { getUserVehicles } = await import('../utils/api');
@@ -62,8 +56,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
       userId: '',
       licensePlate: v.licensePlate,
       vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
-      model: v.model || undefined,
-      year: v.year || undefined,
+      carId: v.carId || undefined,
       createdAt: v.createdAt || new Date().toISOString(),
     }));
     set({ vehicles });
@@ -97,8 +90,7 @@ export const useVehicleStore = create<VehicleState>((set) => ({
       userId: '',
       licensePlate: v.licensePlate,
       vehicleType: v.vehicleType.toLowerCase() as 'private' | 'taxi' | 'rental',
-      model: v.model || undefined,
-      year: v.year || undefined,
+      carId: v.carId || undefined,
       createdAt: v.createdAt || new Date().toISOString(),
     }));
     set({ vehicles, selectedVehicle: null });
@@ -106,13 +98,6 @@ export const useVehicleStore = create<VehicleState>((set) => ({
 
   selectVehicle: (vehicle) => {
     set({ selectedVehicle: vehicle });
-  },
-
-  fetchTripRecords: async (vehicleId) => {
-    // Mock 데이터 제거됨 - 실제 API를 사용합니다
-    set({ isLoading: true });
-    // TODO: 실제 API 호출로 대체 필요
-    set({ tripRecords: [], isLoading: false });
   },
 }));
 

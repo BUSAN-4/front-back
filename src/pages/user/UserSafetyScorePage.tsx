@@ -2,22 +2,58 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { Calendar, TrendingUp, AlertTriangle, Eye, Gauge, ChevronRight } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Calendar, TrendingUp, AlertTriangle, Eye, Gauge, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Progress } from '../../components/ui/progress';
 import { getMonthlySafetyScores, getSessionSafetyDetail, type MonthlySafetyScore, type SessionSafetyDetail } from '../../utils/api';
 import { useNavigate } from 'react-router-dom';
+import { useVehicle } from '../../hooks/useVehicle';
 
 export default function UserSafetyScorePage() {
+  const { vehicles, fetchVehicles } = useVehicle();
   const [scores, setScores] = useState<MonthlySafetyScore[]>([]);
+  const [filteredScores, setFilteredScores] = useState<MonthlySafetyScore[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchVehicles();
+  }, [fetchVehicles]);
 
   useEffect(() => {
     fetchSafetyScores();
   }, [selectedYear, selectedMonth]);
+
+  useEffect(() => {
+    const now = new Date();
+    
+    // 현재 날짜보다 미래인 데이터 필터링
+    const validScores = scores.filter((score) => {
+      if (!score.endTime && !score.startTime) return false;
+      const scoreDate = score.endTime ? new Date(score.endTime) : (score.startTime ? new Date(score.startTime) : null);
+      if (!scoreDate) return false;
+      // 현재 날짜보다 미래인 데이터는 제외
+      return scoreDate <= now;
+    });
+    
+    // 선택한 차량으로 필터링
+    let filtered = validScores;
+    if (selectedVehicleId !== 'all') {
+      const selectedVehicle = vehicles.find(v => v.id.toString() === selectedVehicleId);
+      if (selectedVehicle?.carId) {
+        filtered = validScores.filter(score => score.carId === selectedVehicle.carId);
+      }
+    }
+    
+    setFilteredScores(filtered);
+    setCurrentPage(1); // 필터 변경 시 첫 페이지로 리셋
+  }, [scores, selectedVehicleId, vehicles]);
 
   const fetchSafetyScores = async () => {
     setLoading(true);
@@ -56,9 +92,9 @@ export default function UserSafetyScorePage() {
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
-  // 월별 평균 점수 계산
-  const averageScore = scores.length > 0
-    ? Math.round(scores.reduce((sum, s) => sum + s.safetyScore, 0) / scores.length)
+  // 월별 평균 점수 계산 (필터링된 점수 기준)
+  const averageScore = filteredScores.length > 0
+    ? Math.round(filteredScores.reduce((sum, s) => sum + s.safetyScore, 0) / filteredScores.length)
     : 0;
 
   return (
@@ -66,9 +102,24 @@ export default function UserSafetyScorePage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">안전운전 점수</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">월별 안전운전 점수</h1>
           <p className="text-gray-600">주행별 안전운전 점수 및 상세 정보</p>
         </div>
+        {vehicles.length > 0 && (
+          <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="차량 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">전체 차량</SelectItem>
+              {vehicles.map((vehicle) => (
+                <SelectItem key={vehicle.id} value={vehicle.id.toString()}>
+                  {vehicle.licensePlate}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* 월 선택 컨트롤 */}
@@ -114,7 +165,7 @@ export default function UserSafetyScorePage() {
       </Card>
 
       {/* 월별 평균 점수 */}
-      {scores.length > 0 && (
+      {filteredScores.length > 0 && (
         <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 via-blue-50/50 to-white shadow-lg">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2 text-xl">
@@ -122,7 +173,8 @@ export default function UserSafetyScorePage() {
               {selectedYear}년 {selectedMonth}월 평균 안전운전 점수
             </CardTitle>
             <CardDescription className="text-base">
-              총 {scores.length}개 주행 세션의 평균 점수
+              총 {filteredScores.length}개 주행 세션의 평균 점수
+              {selectedVehicleId !== 'all' && ` (선택한 차량만)`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -142,7 +194,7 @@ export default function UserSafetyScorePage() {
                 </div>
                 <Progress value={averageScore} className="h-4" />
                 <div className="flex items-center gap-4 text-sm text-gray-600">
-                  <span>• 총 세션: {scores.length}개</span>
+                  <span>• 총 세션: {filteredScores.length}개</span>
                   <span>• 평균 점수: {averageScore}점</span>
                 </div>
               </div>
@@ -191,19 +243,33 @@ export default function UserSafetyScorePage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {scores.length === 0 ? (
+            {filteredScores.length === 0 ? (
               <div className="py-16 text-center">
                 <div className="flex flex-col items-center gap-4">
                   <Calendar className="size-16 text-gray-300" />
                   <div className="text-gray-500 text-lg font-medium">
-                    {selectedYear}년 {selectedMonth}월 데이터가 없습니다.
+                    {selectedVehicleId !== 'all' 
+                      ? '선택한 차량의 데이터가 없습니다.'
+                      : `${selectedYear}년 ${selectedMonth}월 데이터가 없습니다.`}
                   </div>
-                  <p className="text-sm text-gray-400">다른 기간을 선택해주세요.</p>
+                  <p className="text-sm text-gray-400">
+                    {selectedVehicleId !== 'all' 
+                      ? '다른 차량을 선택하거나 전체 차량을 선택해주세요.'
+                      : '다른 기간을 선택해주세요.'}
+                  </p>
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                {scores.map((score) => (
+              <>
+                <div className="space-y-4">
+                  {(() => {
+                    // 페이지네이션 계산
+                    const totalPages = Math.ceil(filteredScores.length / itemsPerPage);
+                    const startIndex = (currentPage - 1) * itemsPerPage;
+                    const endIndex = startIndex + itemsPerPage;
+                    const currentPageScores = filteredScores.slice(startIndex, endIndex);
+                    
+                    return currentPageScores.map((score) => (
                   <Card
                     key={score.sessionId}
                     className="border-2 border-gray-200 hover:border-blue-400 hover:shadow-md transition-all duration-200"
@@ -294,8 +360,114 @@ export default function UserSafetyScorePage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
+                    ));
+                  })()}
+                </div>
+                
+                {/* 페이지네이션 */}
+                {filteredScores.length > 0 && (() => {
+                  const totalPages = Math.ceil(filteredScores.length / itemsPerPage);
+                  const maxVisiblePages = 5;
+                  
+                  // 표시할 페이지 번호 계산
+                  const getPageNumbers = () => {
+                    const pages: (number | string)[] = [];
+                    
+                    if (totalPages <= maxVisiblePages) {
+                      for (let i = 1; i <= totalPages; i++) {
+                        pages.push(i);
+                      }
+                    } else {
+                      if (currentPage <= 3) {
+                        for (let i = 1; i <= 5; i++) {
+                          pages.push(i);
+                        }
+                        pages.push('...');
+                        pages.push(totalPages);
+                      } else if (currentPage >= totalPages - 2) {
+                        pages.push(1);
+                        pages.push('...');
+                        for (let i = totalPages - 4; i <= totalPages; i++) {
+                          pages.push(i);
+                        }
+                      } else {
+                        pages.push(1);
+                        pages.push('...');
+                        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+                          pages.push(i);
+                        }
+                        pages.push('...');
+                        pages.push(totalPages);
+                      }
+                    }
+                    
+                    return pages;
+                  };
+                  
+                  const pageNumbers = getPageNumbers();
+                  
+                  return (
+                    <div className="flex flex-col items-center gap-4 mt-6 pt-4 border-t border-gray-200">
+                      <div className="text-sm text-gray-600">
+                        전체 {filteredScores.length}개 중 {((currentPage - 1) * itemsPerPage) + 1}-
+                        {Math.min(currentPage * itemsPerPage, filteredScores.length)}개 표시
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1}
+                          className="flex items-center gap-1"
+                        >
+                          <ChevronLeft className="size-4" />
+                          이전
+                        </Button>
+                        
+                        <div className="flex items-center gap-1">
+                          {pageNumbers.map((page, index) => {
+                            if (page === '...') {
+                              return (
+                                <span key={`ellipsis-${index}`} className="px-2 text-gray-400">
+                                  ...
+                                </span>
+                              );
+                            }
+                            
+                            const pageNum = page as number;
+                            return (
+                              <Button
+                                key={pageNum}
+                                variant={currentPage === pageNum ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setCurrentPage(pageNum)}
+                                className={`min-w-[40px] ${
+                                  currentPage === pageNum
+                                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                                    : "hover:bg-gray-100"
+                                }`}
+                              >
+                                {pageNum}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage === totalPages}
+                          className="flex items-center gap-1"
+                        >
+                          다음
+                          <ChevronRight className="size-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
             )}
           </CardContent>
         </Card>

@@ -10,10 +10,10 @@ import AdminLayout from '../layouts/AdminLayout';
 // 인증 페이지 (초기 로딩에 필요하므로 일반 import)
 import LoginPage from '../pages/auth/LoginPage';
 import RegisterPage from '../pages/auth/RegisterPage';
+import OAuthCallback from '../pages/auth/OAuthCallback';
 
 // Lazy loading - 일반 사용자
 const UserDashboardPage = lazy(() => import('../pages/user/UserDashboardPage'));
-const UserTripDetailPage = lazy(() => import('../pages/user/UserTripDetailPage'));
 const UserMyPage = lazy(() => import('../pages/user/UserMyPage'));
 const UserSafetyScorePage = lazy(() => import('../pages/user/UserSafetyScorePage'));
 const UserSafetyDetailPage = lazy(() => import('../pages/user/UserSafetyDetailPage'));
@@ -22,7 +22,6 @@ const UserSafetyDetailPage = lazy(() => import('../pages/user/UserSafetyDetailPa
 const CityDashboardSafeDriving = lazy(() => import('../pages/admin/city/CityDashboardSafeDriving'));
 const CityDashboardDelinquent = lazy(() => import('../pages/admin/city/CityDashboardDelinquent'));
 const CityDashboardMissingPerson = lazy(() => import('../pages/admin/city/CityDashboardMissingPerson'));
-const CityBestDriversPage = lazy(() => import('../pages/admin/city/CityBestDriversPage'));
 
 // Lazy loading - 국세청 관리자
 const NTSDashboard = lazy(() => import('../pages/admin/nts/NTSDashboard'));
@@ -47,6 +46,7 @@ export default function AppRouter() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/auth/callback" element={<OAuthCallback />} />
 
       {/* 일반 사용자 라우트 */}
       <Route
@@ -79,14 +79,6 @@ export default function AppRouter() {
           element={
             <Suspense fallback={<PageLoader />}>
               <UserSafetyDetailPage />
-            </Suspense>
-          } 
-        />
-        <Route 
-          path="trip-detail/:vehicleId" 
-          element={
-            <Suspense fallback={<PageLoader />}>
-              <UserTripDetailPage />
             </Suspense>
           } 
         />
@@ -133,14 +125,6 @@ export default function AppRouter() {
           element={
             <Suspense fallback={<PageLoader />}>
               <CityDashboardMissingPerson />
-            </Suspense>
-          } 
-        />
-        <Route 
-          path="best-drivers" 
-          element={
-            <Suspense fallback={<PageLoader />}>
-              <CityBestDriversPage />
             </Suspense>
           } 
         />

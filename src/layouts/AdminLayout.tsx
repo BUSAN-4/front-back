@@ -2,6 +2,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Car, Shield, Building2, BadgeAlert, UserX, LogOut, Settings, LayoutDashboard, Users, FileText } from 'lucide-react';
+import { logUserAction } from '../utils/api';
 
 interface AdminLayoutProps {
   type: 'busan' | 'nts' | 'police' | 'system';
@@ -12,7 +13,9 @@ export default function AdminLayout({ type }: AdminLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // 로그아웃 로그 기록
+    await logUserAction('로그아웃', `사용자: ${user?.name || user?.email}`);
     logout();
     navigate('/login');
   };
@@ -87,8 +90,9 @@ export default function AdminLayout({ type }: AdminLayoutProps) {
             return (
               <button
                 key={item.path}
-                onClick={() => {
+                onClick={async () => {
                   const [path] = item.path.split('?');
+                  await logUserAction('사이드바 메뉴 클릭', item.label);
                   navigate(path);
                 }}
                 className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all text-base font-semibold ${

@@ -2,13 +2,16 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Car, User, LogOut, LayoutDashboard, Shield } from 'lucide-react';
+import { logUserAction } from '../utils/api';
 
 export default function UserLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // 로그아웃 로그 기록
+    await logUserAction('로그아웃', `사용자: ${user?.name || user?.email}`);
     logout();
     navigate('/login');
   };
@@ -39,7 +42,10 @@ export default function UserLayout() {
               
               <nav className="hidden md:flex items-center gap-3 ml-10">
                 <button
-                  onClick={() => navigate('/user/dashboard')}
+                  onClick={async () => {
+                    await logUserAction('탭바 클릭', '대시보드');
+                    navigate('/user/dashboard');
+                  }}
                   className={`px-6 py-3 rounded-xl transition-all flex items-center gap-3 text-base font-semibold ${
                     isActive('/user/dashboard')
                       ? 'bg-blue-50 text-blue-600 shadow-apple'
@@ -50,7 +56,10 @@ export default function UserLayout() {
                   대시보드
                 </button>
                 <button
-                  onClick={() => navigate('/user/safety-score')}
+                  onClick={async () => {
+                    await logUserAction('탭바 클릭', '월별 안전운전 점수');
+                    navigate('/user/safety-score');
+                  }}
                   className={`px-6 py-3 rounded-xl transition-all flex items-center gap-3 text-base font-semibold ${
                     isActive('/user/safety-score') || isActive('/user/safety-detail')
                       ? 'bg-blue-50 text-blue-600 shadow-apple'
@@ -58,10 +67,13 @@ export default function UserLayout() {
                   }`}
                 >
                   <Shield className="size-5" />
-                  안전운전 점수
+                  월별 안전운전 점수
                 </button>
                 <button
-                  onClick={() => navigate('/user/mypage')}
+                  onClick={async () => {
+                    await logUserAction('탭바 클릭', '마이페이지');
+                    navigate('/user/mypage');
+                  }}
                   className={`px-6 py-3 rounded-xl transition-all flex items-center gap-3 text-base font-semibold ${
                     isActive('/user/mypage')
                       ? 'bg-blue-50 text-blue-600 shadow-apple'
@@ -93,7 +105,10 @@ export default function UserLayout() {
         <div className="max-w-7xl mx-auto px-6 sm:px-8">
           <div className="flex gap-4 py-3">
             <button
-              onClick={() => navigate('/user/dashboard')}
+              onClick={async () => {
+                await logUserAction('탭바 클릭', '대시보드 (모바일)');
+                navigate('/user/dashboard');
+              }}
               className={`flex-1 py-3 text-center rounded-xl transition-all text-base font-semibold ${
                 isActive('/user/dashboard')
                   ? 'bg-blue-50 text-blue-600 shadow-apple'
@@ -103,17 +118,23 @@ export default function UserLayout() {
               대시보드
             </button>
             <button
-              onClick={() => navigate('/user/safety-score')}
+              onClick={async () => {
+                await logUserAction('탭바 클릭', '월별 안전운전 점수 (모바일)');
+                navigate('/user/safety-score');
+              }}
               className={`flex-1 py-3 text-center rounded-xl transition-all text-base font-semibold ${
                 isActive('/user/safety-score') || isActive('/user/safety-detail')
                   ? 'bg-blue-50 text-blue-600 shadow-apple'
                   : 'text-gray-700'
               }`}
             >
-              안전점수
+              월별 안전운전 점수
             </button>
             <button
-              onClick={() => navigate('/user/mypage')}
+              onClick={async () => {
+                await logUserAction('탭바 클릭', '마이페이지 (모바일)');
+                navigate('/user/mypage');
+              }}
               className={`flex-1 py-3 text-center rounded-xl transition-all text-base font-semibold ${
                 isActive('/user/mypage')
                   ? 'bg-blue-50 text-blue-600 shadow-apple'
