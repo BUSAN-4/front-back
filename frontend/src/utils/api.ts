@@ -28,9 +28,19 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // endpoint가 이미 /api로 시작하는지 확인
-  const cleanEndpoint = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
-  const url = `${getAPIBaseURL()}${cleanEndpoint}`;
+  const baseUrl = getAPIBaseURL();
+  
+  // baseUrl이 이미 /api로 끝나면 endpoint에 /api를 추가하지 않음
+  // endpoint가 /로 시작하지 않으면 추가
+  let cleanEndpoint = endpoint;
+  if (!cleanEndpoint.startsWith('/')) {
+    cleanEndpoint = `/${cleanEndpoint}`;
+  }
+  
+  // baseUrl이 /api로 끝나면 그대로 사용, 아니면 /api 추가
+  const url = baseUrl.endsWith('/api') 
+    ? `${baseUrl}${cleanEndpoint}`
+    : `${baseUrl}/api${cleanEndpoint}`;
   
   console.log('API Request URL:', url); // 디버깅용
   
