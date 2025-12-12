@@ -257,7 +257,13 @@ export interface RegisterResponse {
 }
 
 export async function login(credentials: LoginRequest): Promise<LoginResponse> {
-  const response = await fetch(`${getAPIBaseURL()}/api/auth/login`, {
+  const baseUrl = getAPIBaseURL();
+  // baseUrl이 이미 /api로 끝나면 /api를 추가하지 않음
+  const url = baseUrl.endsWith('/api') 
+    ? `${baseUrl}/auth/login` 
+    : `${baseUrl}/api/auth/login`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -285,7 +291,13 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
 
 export async function register(credentials: RegisterRequest): Promise<RegisterResponse> {
   try {
-    const response = await fetch(`${getAPIBaseURL()}/api/auth/register`, {
+    const baseUrl = getAPIBaseURL();
+    // baseUrl이 이미 /api로 끝나면 /api를 추가하지 않음
+    const url = baseUrl.endsWith('/api') 
+      ? `${baseUrl}/auth/register` 
+      : `${baseUrl}/api/auth/register`;
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
