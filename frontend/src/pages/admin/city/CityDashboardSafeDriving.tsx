@@ -7,6 +7,12 @@ import PowerBIEmbedView from '../../../components/common/powerbi/PowerBIEmbedVie
 const POWER_BI_REPORT_URL = import.meta.env.VITE_POWER_BI_SAFE_DRIVING_URL || "";
 const POWER_BI_BEST_DRIVER_URL = import.meta.env.VITE_POWER_BI_BEST_DRIVER_URL || "";
 
+// 디버깅: 환경 변수 확인
+console.log('Power BI URLs:', {
+  SAFE_DRIVING: POWER_BI_REPORT_URL || 'NOT SET',
+  BEST_DRIVER: POWER_BI_BEST_DRIVER_URL || 'NOT SET'
+});
+
 export default function CityDashboardSafeDriving() {
   const [activeTab, setActiveTab] = useState<string>('map-visualization');
 
