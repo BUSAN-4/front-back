@@ -23,8 +23,7 @@ export default function SystemLogMonitoringPage() {
     try {
       setLoading(true);
       setError(null);
-      // 최신 로그 50개만 조회 (표시만, DB에는 모든 로그 저장)
-      const data = await getUserLogs({ limit: 50 });
+      const data = await getUserLogs({ limit: 1000 });
       setLogs(data);
     } catch (err) {
       console.error('로그 조회 실패:', err);
@@ -77,7 +76,7 @@ export default function SystemLogMonitoringPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>시스템 접속 및 행동 로그</CardTitle>
-              <CardDescription>최신 로그 50개만 표시됩니다 (DB에는 모든 로그 저장)</CardDescription>
+              <CardDescription>전체 로그 목록</CardDescription>
             </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 size-4 text-gray-400" />
@@ -120,8 +119,8 @@ export default function SystemLogMonitoringPage() {
                       <th className="text-left py-3 px-4 text-gray-700 font-medium">시간</th>
                       <th className="text-left py-3 px-4 text-gray-700 font-medium">사용자</th>
                       <th className="text-left py-3 px-4 text-gray-700 font-medium">액션</th>
-                      <th className="text-left py-3 px-4 text-gray-700 font-medium">상세정보</th>
                       <th className="text-left py-3 px-4 text-gray-700 font-medium">IP 주소</th>
+                      <th className="text-center py-3 px-4 text-gray-700 font-medium">상태</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -135,10 +134,8 @@ export default function SystemLogMonitoringPage() {
                         )}
                       </td>
                       <td className="py-3 px-4 text-gray-700">{log.action}</td>
-                      <td className="py-3 px-4 text-gray-700 text-sm max-w-xs truncate" title={log.details || ''}>
-                        {log.details || '-'}
-                      </td>
                       <td className="py-3 px-4 text-gray-700">{log.ip}</td>
+                      <td className="py-3 px-4 text-center">{getStatusBadge(log.status)}</td>
                     </tr>
                     ))}
                   </tbody>

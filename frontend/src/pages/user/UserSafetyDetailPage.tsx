@@ -48,27 +48,6 @@ export default function UserSafetyDetailPage() {
     return <Badge variant="destructive">주의</Badge>;
   };
 
-  const formatTimeGroup = (timeGroup: string) => {
-    // "2250-2300" 형식을 "22:50 - 23:00" 형식으로 변환
-    const parts = timeGroup.split('-');
-    if (parts.length !== 2) return timeGroup;
-    
-    const formatTime = (timeStr: string) => {
-      // "2250" -> "22:50"
-      if (timeStr.length === 4) {
-        const hour = timeStr.substring(0, 2);
-        const minute = timeStr.substring(2, 4);
-        return `${hour}:${minute}`;
-      }
-      return timeStr;
-    };
-    
-    const startTime = formatTime(parts[0]);
-    const endTime = formatTime(parts[1]);
-    
-    return `${startTime} - ${endTime}`;
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -231,7 +210,7 @@ export default function UserSafetyDetailPage() {
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                           <Clock className="size-4 text-gray-400" />
-                          <span className="font-medium">{formatTimeGroup(rapid.timeGroup)}</span>
+                          <span className="font-medium">{rapid.timeGroup}시</span>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="text-sm text-gray-600">

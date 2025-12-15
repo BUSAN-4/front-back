@@ -1,18 +1,22 @@
 // API URL 자동 감지: 환경 변수가 있으면 사용, 없으면 현재 호스트 기반으로 자동 설정
 export const getApiBaseUrl = (): string => {
-  // 환경 변수가 명시적으로 설정되어 있고 빈 문자열이 아니면 사용
-  const envApiUrl = import.meta.env.VITE_API_BASE_URL;
-  if (envApiUrl && envApiUrl.trim() !== '') {
-    return envApiUrl;
+  // 환경 변수가 명시적으로 설정되어 있으면 사용
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
   }
   
-  // 프로덕션 환경: 같은 호스트의 /api 경로 사용 (Nginx 프록시)
+  // 현재 페이지의 호스트를 기반으로 API URL 생성 (개발/프로덕션 모두 적용)
   const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  
+  // localhost가 아니면 (다른 PC에서 접근 중) 같은 호스트의 8000 포트 사용
   if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    return '/api';
+    // 프로토콜이 https면 https 사용, 아니면 http 사용
+    const apiProtocol = protocol === 'https:' ? 'https:' : 'http:';
+    return `${apiProtocol}//${hostname}:8000`;
   }
   
-  // 개발 환경: localhost의 8000 포트 사용
+  // 기본값: localhost
   return 'http://localhost:8000';
 };
 
@@ -28,19 +32,9 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const baseUrl = getAPIBaseURL();
-  
-  // baseUrl이 이미 /api로 끝나면 endpoint에 /api를 추가하지 않음
-  // endpoint가 /로 시작하지 않으면 추가
-  let cleanEndpoint = endpoint;
-  if (!cleanEndpoint.startsWith('/')) {
-    cleanEndpoint = `/${cleanEndpoint}`;
-  }
-  
-  // baseUrl이 /api로 끝나면 그대로 사용, 아니면 /api 추가
-  const url = baseUrl.endsWith('/api') 
-    ? `${baseUrl}${cleanEndpoint}`
-    : `${baseUrl}/api${cleanEndpoint}`;
+  // endpoint가 이미 /api로 시작하는지 확인
+  const cleanEndpoint = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
+  const url = `${getAPIBaseURL()}${cleanEndpoint}`;
   
   console.log('API Request URL:', url); // 디버깅용
   
@@ -263,13 +257,7 @@ export interface RegisterResponse {
 }
 
 export async function login(credentials: LoginRequest): Promise<LoginResponse> {
-  const baseUrl = getAPIBaseURL();
-  // baseUrl이 이미 /api로 끝나면 /api를 추가하지 않음
-  const url = baseUrl.endsWith('/api') 
-    ? `${baseUrl}/auth/login` 
-    : `${baseUrl}/api/auth/login`;
-  
-  const response = await fetch(url, {
+  const response = await fetch(`${getAPIBaseURL()}/api/auth/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -297,13 +285,7 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
 
 export async function register(credentials: RegisterRequest): Promise<RegisterResponse> {
   try {
-    const baseUrl = getAPIBaseURL();
-    // baseUrl이 이미 /api로 끝나면 /api를 추가하지 않음
-    const url = baseUrl.endsWith('/api') 
-      ? `${baseUrl}/auth/register` 
-      : `${baseUrl}/api/auth/register`;
-    
-    const response = await fetch(url, {
+    const response = await fetch(`${getAPIBaseURL()}/api/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

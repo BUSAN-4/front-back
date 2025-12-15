@@ -199,7 +199,7 @@ export default function CityDashboardMissingPerson() {
       </div>
 
       {/* 탭 네비게이션 */}
-      <Tabs defaultValue="powerbi" className="space-y-6">
+      <Tabs defaultValue="trend" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="powerbi">
             <Calendar className="size-4 mr-2" />
