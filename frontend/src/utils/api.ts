@@ -36,14 +36,14 @@ export async function apiRequest<T>(
     cleanEndpoint = `/${cleanEndpoint}`;
   }
   
-  // baseUrl이 /api로 끝나면 endpoint에 /api를 추가하지 않음
-  // baseUrl이 http://로 시작하면 endpoint에 /api를 추가
+  // baseUrl이 /api이면 프로덕션 (Nginx가 /api를 프록시)
+  // baseUrl이 http://로 시작하면 개발 환경
   let url: string;
   if (baseUrl === '/api') {
-    // 프로덕션: baseUrl이 /api이면 endpoint에 /api가 포함되어야 함
-    url = `${baseUrl}${cleanEndpoint.startsWith('/api') ? cleanEndpoint : `/api${cleanEndpoint}`}`;
+    // 프로덕션: /api/users/me 형태
+    url = `${baseUrl}${cleanEndpoint}`;
   } else {
-    // 개발 환경: baseUrl이 http://localhost:8000이면 /api 추가
+    // 개발 환경: http://localhost:8000/api/users/me 형태
     url = `${baseUrl}/api${cleanEndpoint}`;
   }
   
