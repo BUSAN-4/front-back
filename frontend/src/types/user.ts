@@ -9,6 +9,7 @@ export interface User {
   phone?: string;
   organization?: string;
   createdAt: string;
+  oauth_provider?: string; // OAuth 제공자 (google, kakao 등)
 }
 
 
