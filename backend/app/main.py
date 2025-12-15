@@ -10,7 +10,7 @@ from app.core.config import settings
 app = FastAPI(
     title="FastAPI Backend",
     description="FastAPI 백엔드 애플리케이션",
-    version="1.0.0"
+    version="1.0.1"  # OAuth 라우터 포함 버전
 )
 
 # CORS 설정 - 환경 변수에서 허용된 origin 목록 가져오기
