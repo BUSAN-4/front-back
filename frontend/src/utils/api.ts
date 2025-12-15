@@ -1,22 +1,20 @@
 // API URL 자동 감지: 환경 변수가 있으면 사용, 없으면 현재 호스트 기반으로 자동 설정
 export const getApiBaseUrl = (): string => {
   // 환경 변수가 명시적으로 설정되어 있으면 사용
-  if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
+  const envApiUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envApiUrl && envApiUrl.trim() !== '') {
+    return envApiUrl;
   }
   
-  // 현재 페이지의 호스트를 기반으로 API URL 생성 (개발/프로덕션 모두 적용)
+  // 현재 페이지의 호스트를 기반으로 API URL 생성
   const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
   
-  // localhost가 아니면 (다른 PC에서 접근 중) 같은 호스트의 8000 포트 사용
+  // localhost가 아니면 프로덕션 환경 (Nginx가 /api를 프록시)
   if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    // 프로토콜이 https면 https 사용, 아니면 http 사용
-    const apiProtocol = protocol === 'https:' ? 'https:' : 'http:';
-    return `${apiProtocol}//${hostname}:8000`;
+    return '/api'; // 프로덕션: Nginx가 /api를 백엔드로 프록시
   }
   
-  // 기본값: localhost
+  // 개발 환경: localhost
   return 'http://localhost:8000';
 };
 
@@ -32,9 +30,22 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // endpoint가 이미 /api로 시작하는지 확인
-  const cleanEndpoint = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
-  const url = `${getAPIBaseURL()}${cleanEndpoint}`;
+  const baseUrl = getAPIBaseURL();
+  let cleanEndpoint = endpoint;
+  if (!cleanEndpoint.startsWith('/')) {
+    cleanEndpoint = `/${cleanEndpoint}`;
+  }
+  
+  // baseUrl이 /api로 끝나면 endpoint에 /api를 추가하지 않음
+  // baseUrl이 http://로 시작하면 endpoint에 /api를 추가
+  let url: string;
+  if (baseUrl === '/api') {
+    // 프로덕션: baseUrl이 /api이면 endpoint에 /api가 포함되어야 함
+    url = `${baseUrl}${cleanEndpoint.startsWith('/api') ? cleanEndpoint : `/api${cleanEndpoint}`}`;
+  } else {
+    // 개발 환경: baseUrl이 http://localhost:8000이면 /api 추가
+    url = `${baseUrl}/api${cleanEndpoint}`;
+  }
   
   console.log('API Request URL:', url); // 디버깅용
   

@@ -31,7 +31,11 @@ export default function OAuthCallback() {
       // 사용자 정보 가져오기
       const fetchUserInfo = async () => {
         try {
-          const response = await fetch(`${getApiBaseUrl()}/api/users/me`, {
+          const baseUrl = getApiBaseUrl();
+          const apiUrl = baseUrl === '/api' 
+            ? `${baseUrl}/users/me`
+            : `${baseUrl}/api/users/me`;
+          const response = await fetch(apiUrl, {
             headers: {
               'Authorization': `Bearer ${token}`
             }

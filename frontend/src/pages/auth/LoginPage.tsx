@@ -235,7 +235,12 @@ export default function LoginPage() {
                     userType: userType,
                     ...(userType === 'admin' && organization ? { organization: organization } : {})
                   });
-                  window.location.href = `${getApiBaseUrl()}/api/oauth/login/google?${params.toString()}`;
+                  const baseUrl = getApiBaseUrl();
+                  // baseUrl이 /api로 끝나면 그대로 사용, 아니면 /api 추가
+                  const oauthUrl = baseUrl === '/api' 
+                    ? `${baseUrl}/oauth/login/google?${params.toString()}`
+                    : `${baseUrl}/api/oauth/login/google?${params.toString()}`;
+                  window.location.href = oauthUrl;
                 }}
               >
                 <svg className="size-5 mr-2" viewBox="0 0 24 24">
