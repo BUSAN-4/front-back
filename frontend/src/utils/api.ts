@@ -268,7 +268,11 @@ export interface RegisterResponse {
 }
 
 export async function login(credentials: LoginRequest): Promise<LoginResponse> {
-  const response = await fetch(`${getAPIBaseURL()}/api/auth/login`, {
+  const baseUrl = getAPIBaseURL();
+  const loginUrl = baseUrl === '/api' 
+    ? `${baseUrl}/auth/login`
+    : `${baseUrl}/api/auth/login`;
+  const response = await fetch(loginUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -296,7 +300,11 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
 
 export async function register(credentials: RegisterRequest): Promise<RegisterResponse> {
   try {
-    const response = await fetch(`${getAPIBaseURL()}/api/auth/register`, {
+    const baseUrl = getAPIBaseURL();
+    const registerUrl = baseUrl === '/api' 
+      ? `${baseUrl}/auth/register`
+      : `${baseUrl}/api/auth/register`;
+    const response = await fetch(registerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
