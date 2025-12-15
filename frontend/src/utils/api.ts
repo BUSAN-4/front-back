@@ -1,11 +1,5 @@
 // API URL 자동 감지: 환경 변수가 있으면 사용, 없으면 현재 호스트 기반으로 자동 설정
 export const getApiBaseUrl = (): string => {
-  // 환경 변수가 명시적으로 설정되어 있으면 사용
-  const envApiUrl = import.meta.env.VITE_API_BASE_URL;
-  if (envApiUrl && envApiUrl.trim() !== '') {
-    return envApiUrl;
-  }
-  
   // 현재 페이지의 호스트를 기반으로 API URL 생성
   const hostname = window.location.hostname;
   
@@ -14,7 +8,13 @@ export const getApiBaseUrl = (): string => {
     return '/api'; // 프로덕션: Nginx가 /api를 백엔드로 프록시
   }
   
-  // 개발 환경: localhost
+  // 개발 환경: 환경 변수가 있으면 사용, 없으면 localhost
+  const envApiUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envApiUrl && envApiUrl.trim() !== '') {
+    return envApiUrl;
+  }
+  
+  // 기본값: localhost
   return 'http://localhost:8000';
 };
 
